@@ -56,59 +56,82 @@ public class WordProcessingService : IWordProcessingService
 
     private async Task ProcessWordsInDatabaseAsync(Dictionary<string, int> wordsToProcess)
     {
-        using var transaction = await _context.Database.BeginTransactionAsync();
+        // Use execution strategy to handle retries instead of manual transaction
+        var strategy = _context.Database.CreateExecutionStrategy();
         
-        try
+        await strategy.ExecuteAsync(async () =>
         {
-            var wordsList = wordsToProcess.Keys.ToList();
+            // Transaction is now inside the retry strategy
+            using var transaction = await _context.Database.BeginTransactionAsync();
             
-            var existingWords = await _context.Words
-                .Where(w => wordsList.Contains(w.WordLower))
-                .ToListAsync();
-
-            foreach (var existingWord in existingWords)
+            try
             {
-                if (wordsToProcess.TryGetValue(existingWord.WordLower, out var count))
+                var wordsList = wordsToProcess.Keys.ToList();
+                
+                var existingWords = await _context.Words
+                    .Where(w => wordsList.Contains(w.WordLower))
+                    .ToListAsync();
+
+                foreach (var existingWord in existingWords)
                 {
-                    existingWord.WordCount += count;
-                    wordsToProcess.Remove(existingWord.WordLower);
+                    if (wordsToProcess.TryGetValue(existingWord.WordLower, out var count))
+                    {
+                        existingWord.WordCount += count;
+                        wordsToProcess.Remove(existingWord.WordLower);
+                    }
                 }
+
+                var newWords = wordsToProcess.Select(kvp => new Word
+                {
+                    WordLower = kvp.Key,
+                    WordCount = kvp.Value
+                }).ToList();
+
+                if (newWords.Any())
+                {
+                    await _context.Words.AddRangeAsync(newWords);
+                }
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                
+                _logger.LogInformation("Database update completed: {UpdatedCount} words updated, {NewCount} words added",
+                    existingWords.Count, newWords.Count);
             }
-
-            var newWords = wordsToProcess.Select(kvp => new Word
+            catch (Exception ex)
             {
-                WordLower = kvp.Key,
-                WordCount = kvp.Value
-            }).ToList();
-
-            if (newWords.Any())
-            {
-                await _context.Words.AddRangeAsync(newWords);
+                await transaction.RollbackAsync();
+                _logger.LogError(ex, "Error processing words in database");
+                throw;
             }
-
-            await _context.SaveChangesAsync();
-            await transaction.CommitAsync();
-            
-            _logger.LogInformation("Database update completed: {UpdatedCount} words updated, {NewCount} words added",
-                existingWords.Count, newWords.Count);
-        }
-        catch (Exception ex)
-        {
-            await transaction.RollbackAsync();
-            _logger.LogError(ex, "Error processing words in database");
-            throw;
-        }
+        });
     }
 
     private List<string> ExtractAndFilterWords(string input)
     {
-        var words = Regex.Split(input, @"[\s,\.\-&/\\:;'""()\[\]{}]+")
+        // First, identify and remove possessive words/names
+        var possessivePattern = @"\b\w+'s?\b";
+        var possessiveWords = Regex.Matches(input, possessivePattern, RegexOptions.IgnoreCase)
+            .Select(m => m.Value.ToLowerInvariant())
+            .ToHashSet();
+        
+        // Remove possessive forms from the input for word extraction
+        var cleanedInput = Regex.Replace(input, possessivePattern, " ", RegexOptions.IgnoreCase);
+        
+        var words = Regex.Split(cleanedInput, @"[\s,\.\-&/\\:;'""()\[\]{}]+")
             .Where(w => !string.IsNullOrWhiteSpace(w))
             .Select(w => w.Trim())
             .Where(w => w.Length > 1)
             .Where(w => !_indicatorService.IsStopWord(w))
             .Where(w => !Regex.IsMatch(w, @"^\d+$"))
             .ToList();
+
+        // Log what we're excluding
+        if (possessiveWords.Any())
+        {
+            _logger.LogInformation("Excluding possessive words from storage: {PossessiveWords}", 
+                string.Join(", ", possessiveWords));
+        }
 
         return words;
     }

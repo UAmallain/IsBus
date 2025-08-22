@@ -11,6 +11,7 @@ public class PhonebookContext : DbContext
     }
 
     public DbSet<Word> Words { get; set; }
+    public DbSet<Name> Names { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +35,56 @@ public class PhonebookContext : DbContext
             entity.Property(e => e.WordCount)
                 .HasColumnName("word_count")
                 .HasDefaultValue(1);
+                
+            entity.Property(e => e.LastSeen)
+                .HasColumnName("last_seen")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                
+            entity.Property(e => e.CreatedAt)
+                .HasColumnName("created_at")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnName("updated_at")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
+        });
+
+        modelBuilder.Entity<Name>(entity =>
+        {
+            entity.ToTable("names");
+            entity.HasKey(e => e.NameId);
+            entity.HasIndex(e => new { e.NameLower, e.NameType }).IsUnique();
+            
+            entity.Property(e => e.NameId)
+                .HasColumnName("name_id")
+                .ValueGeneratedOnAdd();
+                
+            entity.Property(e => e.NameLower)
+                .HasColumnName("name_lower")
+                .IsRequired()
+                .HasMaxLength(255);
+                
+            entity.Property(e => e.NameType)
+                .HasColumnName("name_type")
+                .IsRequired()
+                .HasMaxLength(10)
+                .HasDefaultValue("both");
+                
+            entity.Property(e => e.NameCount)
+                .HasColumnName("name_count")
+                .HasDefaultValue(1);
+                
+            entity.Property(e => e.LastSeen)
+                .HasColumnName("last_seen")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                
+            entity.Property(e => e.CreatedAt)
+                .HasColumnName("created_at")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP");
+                
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnName("updated_at")
+                .HasDefaultValueSql("CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP");
         });
     }
 }

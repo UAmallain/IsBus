@@ -4,7 +4,7 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IsBus", "IsBus.csproj", "{B3E5D3B3-5A5C-4B9E-8B5A-1E5C5B5E5C5C}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IsBus.Tests", "IsBus.Tests.csproj", "{C4F6E4F4-6B6D-4C9F-9C6B-2F6D6C6F6D6D}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "IsBus.Tests", "IsBus.Tests\IsBus.Tests.csproj", "{C4F6E4F4-6B6D-4C9F-9C6B-2F6D6C6F6D6D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

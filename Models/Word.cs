@@ -17,4 +17,13 @@ public class Word
 
     [Column("word_count")]
     public int WordCount { get; set; }
+
+    [Column("last_seen")]
+    public DateTime LastSeen { get; set; } = DateTime.Now;
+
+    [Column("created_at")]
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+
+    [Column("updated_at")]
+    public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }

@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="IsBus.csproj" />
+    <ProjectReference Include="..\IsBus.csproj" />
   </ItemGroup>
 
 </Project>
