@@ -70,9 +70,54 @@ public class DatabaseDrivenParserService : IStringParserService
         result.Phone = phoneExtraction.Phone;
         var remainingText = phoneExtraction.RemainingText.Trim();
         
+        // First, check if this is likely a business based on classification
+        var preliminaryClassification = await _classificationService.ClassifyAsync(remainingText);
+        bool isLikelyBusiness = preliminaryClassification.IsBusiness && preliminaryClassification.Confidence >= 80;
+        
+        // For high-confidence business entries with no clear address indicators,
+        // treat the entire text as the business name
+        if (isLikelyBusiness)
+        {
+            // Check if there are any clear address indicators (numbers, street types with numbers)
+            var words = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            bool hasAddressIndicators = false;
+            
+            for (int i = 0; i < words.Length; i++)
+            {
+                // Check for street numbers
+                if (Regex.IsMatch(words[i], @"^\d+$"))
+                {
+                    hasAddressIndicators = true;
+                    break;
+                }
+                // Check for unit indicators
+                if (Regex.IsMatch(words[i], @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase))
+                {
+                    hasAddressIndicators = true;
+                    break;
+                }
+            }
+            
+            // If it's a business with no clear address indicators, keep it all as the name
+            if (!hasAddressIndicators)
+            {
+                result.Name = remainingText;
+                result.Address = "";
+                result.IsBusinessName = true;
+                result.IsResidentialName = false;
+                result.Confidence.NameConfidence = preliminaryClassification.Confidence;
+                result.Confidence.AddressConfidence = 0;
+                result.Confidence.PhoneConfidence = 100;
+                result.Success = true;
+                
+                _logger.LogInformation($"Parsed as business name only: '{input}' -> Name: '{result.Name}', Phone: '{result.Phone}'");
+                return result;
+            }
+        }
+        
         // Check if this looks like a phonebook entry (personal name format)
         // Pattern: [LastName] [FirstName/Initial] [Address]
-        var phonebookParse = await ParsePhonebookFormatAsync(remainingText);
+        var phonebookParse = await ParsePhonebookFormatAsync(remainingText, province);
         if (phonebookParse.IsPhonebook)
         {
             result.Name = phonebookParse.Name;
@@ -306,7 +351,7 @@ public class DatabaseDrivenParserService : IStringParserService
         return bestMatch;
     }
     
-    private async Task<PhonebookParseResult> ParsePhonebookFormatAsync(string text)
+    private async Task<PhonebookParseResult> ParsePhonebookFormatAsync(string text, string? province = null)
     {
         var result = new PhonebookParseResult { IsPhonebook = false };
         var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -316,15 +361,79 @@ public class DatabaseDrivenParserService : IStringParserService
             return result;
         }
         
+        // First, check backwards from the end for community names
+        // BUT ONLY if there are no clear address indicators (numbers, street types)
+        // This helps identify patterns like "Name Initial Community Phone"
+        int communityIndex = -1;
+        
+        // First scan: check if there are any numbers or street indicators in the middle
+        bool hasAddressIndicators = false;
+        for (int i = 1; i < words.Length - 1; i++) // Skip first and last word
+        {
+            if (Regex.IsMatch(words[i], @"^\d+$") || 
+                Regex.IsMatch(words[i], @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase))
+            {
+                hasAddressIndicators = true;
+                break;
+            }
+        }
+        
+        // Only check for community if there are NO other address indicators
+        if (!hasAddressIndicators)
+        {
+            for (int i = words.Length - 1; i >= 2; i--) // Start from end, but ensure at least 2 words before (for name)
+            {
+                var word = words[i];
+                // Skip if this looks like a phone number
+                if (Regex.IsMatch(word, @"^\d{3}-?\d{4}$") || Regex.IsMatch(word, @"^\d{3}$"))
+                {
+                    continue;
+                }
+                
+                // Check if this is a community name
+                bool isCommunity = await _communityService.IsCommunityNameAsync(word, province);
+                if (isCommunity)
+                {
+                    // Make sure we have at least a proper name before it (2+ parts)
+                    // Count non-phone words before this position
+                    int nameWordCount = 0;
+                    for (int j = 0; j < i; j++)
+                    {
+                        if (!Regex.IsMatch(words[j], @"^\d{3}-?\d{4}$"))
+                        {
+                            nameWordCount++;
+                        }
+                    }
+                    
+                    // Need at least 2 name parts (last name + first name/initial)
+                    if (nameWordCount >= 2)
+                    {
+                        communityIndex = i;
+                        _logger.LogDebug($"Found community '{word}' at position {i} with {nameWordCount} name words before it");
+                        break;
+                    }
+                }
+            }
+        }
+        
         // Look for clear address indicators to determine where the name ends
         int addressStartIndex = -1;
+        
+        // If we found a community, use that as the address start
+        if (communityIndex != -1)
+        {
+            addressStartIndex = communityIndex;
+        }
         
         // Common address start patterns:
         // 1. Starts with a number (civic address): "123 Main St"
         // 2. Starts with "Unit", "Apt", "Suite": "Unit 7 1777 Pembina"
         // 3. Contains street types after potential name words
         
-        for (int i = 1; i < words.Length; i++)
+        // Only look for other indicators if we haven't found a community
+        if (addressStartIndex == -1)
+        {
+            for (int i = 1; i < words.Length; i++)
         {
             var word = words[i];
             var prevWord = i > 0 ? words[i - 1] : "";
@@ -334,8 +443,8 @@ public class DatabaseDrivenParserService : IStringParserService
             bool isUnit = Regex.IsMatch(word, @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase);
             bool isStreetType = _streetTypeService.IsStreetType(word);
             
-            // Check if previous word was an ampersand (for names like "M & L")
-            bool prevWasAmpersand = prevWord == "&";
+            // Check if previous word was a connector (& or "et" for names like "M & L" or "Louis et Marie")
+            bool prevWasConnector = prevWord == "&" || prevWord.Equals("et", StringComparison.OrdinalIgnoreCase);
             
             if (isNumber || isUnit)
             {
@@ -345,15 +454,35 @@ public class DatabaseDrivenParserService : IStringParserService
             }
             else if (isStreetType && i > 1)  // Street type after at least 2 words (potential name)
             {
+                // Special case: Check if this is "Dr" used as an honorific (Doctor)
+                // Clues: 1) Comes after a residential name (2 words)
+                //        2) Followed by a number (street address)
+                //        3) Followed by another street name
+                if (word.Equals("Dr", StringComparison.OrdinalIgnoreCase) && i >= 2)
+                {
+                    // Check if the next word is a number (indicating a street address follows)
+                    bool nextIsNumber = (i + 1 < words.Length) && Regex.IsMatch(words[i + 1], @"^\d+$");
+                    
+                    // Check if we have a pattern like "FirstName LastName Dr 123 Street St"
+                    if (nextIsNumber && i + 2 < words.Length)
+                    {
+                        // This looks like Dr is an honorific, not a street type
+                        // Continue looking for the real address start
+                        _logger.LogDebug($"Detected 'Dr' as honorific at position {i}, not street type");
+                        continue;
+                    }
+                }
+                
                 // This might be a street type in the address
                 // But check if the previous word could be part of a name
-                if (!prevWasAmpersand)
+                if (!prevWasConnector)
                 {
                     addressStartIndex = i - 1; // The word before the street type starts the address
                     break;
                 }
             }
         }
+        }  // End of if (addressStartIndex == -1)
         
         // If no clear address indicators found, use database to identify names
         if (addressStartIndex == -1)
@@ -430,12 +559,26 @@ public class DatabaseDrivenParserService : IStringParserService
                     lastNamePartIndex = i;
                     consecutiveNameWords++;
                 }
-                // Is this an ampersand?
-                else if (word == "&")
+                // Is this a connector (& or "et")?
+                else if (word == "&" || word.Equals("et", StringComparison.OrdinalIgnoreCase))
                 {
                     hasAmpersand = true;
                     lastNamePartIndex = i;
                     consecutiveNameWords++;
+                }
+                // Is this "Dr" as an honorific?
+                else if (word.Equals("Dr", StringComparison.OrdinalIgnoreCase) && i >= 2)
+                {
+                    // Check if the next word is a number (indicating a street address follows)
+                    bool nextIsNumber = (i + 1 < words.Length) && Regex.IsMatch(words[i + 1], @"^\d+$");
+                    
+                    if (nextIsNumber)
+                    {
+                        // This is Dr as an honorific, include it in the name
+                        lastNamePartIndex = i;
+                        consecutiveNameWords++;
+                        _logger.LogDebug($"Including 'Dr' as honorific in name at position {i}");
+                    }
                 }
                 // Check if this word is in our name database
                 else if (!Regex.IsMatch(word, @"^\d+$"))
@@ -482,10 +625,10 @@ public class DatabaseDrivenParserService : IStringParserService
                         lastNamePartIndex = i;
                         consecutiveNameWords++;
                         
-                        // If we have an ampersand, include the next word too
+                        // If we have a connector (& or "et"), include the next word too
                         if (hasAmpersand && i < words.Length - 1)
                         {
-                            lastNamePartIndex = i;
+                            lastNamePartIndex = i + 1; // Include the word after the connector
                         }
                     }
                     else if (!firstWordIsLastName)
