@@ -3,7 +3,22 @@
     "allow": [
       "Bash(mkdir:*)",
       "Bash(mv:*)",
-      "Bash(dotnet restore:*)"
+      "Bash(dotnet restore:*)",
+      "Bash(dotnet build)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build)",
+      "Bash(mysql:*)",
+      "Bash(taskkill:*)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 84724)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build IsBus.csproj)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --no-build)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://localhost:5000\")",
+      "Bash(powershell.exe:*)",
+      "Bash(sqlite3:*)",
+      "Bash(python3:*)",
+      "Bash(grep:*)",
+      "Bash(curl:*)",
+      "Bash(pip install:*)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 66972)"
     ],
     "deny": [],
     "ask": []

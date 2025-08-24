@@ -12,12 +12,14 @@ public class BusinessNameDetectionServiceTests
     private readonly BusinessNameDetectionService _service;
     private readonly Mock<IBusinessIndicatorService> _indicatorServiceMock;
     private readonly Mock<IWordProcessingService> _wordProcessingServiceMock;
+    private readonly Mock<IWordFrequencyService> _wordFrequencyServiceMock;
     private readonly Mock<ILogger<BusinessNameDetectionService>> _loggerMock;
 
     public BusinessNameDetectionServiceTests()
     {
         _indicatorServiceMock = new Mock<IBusinessIndicatorService>();
         _wordProcessingServiceMock = new Mock<IWordProcessingService>();
+        _wordFrequencyServiceMock = new Mock<IWordFrequencyService>();
         _loggerMock = new Mock<ILogger<BusinessNameDetectionService>>();
         
         SetupMocks();
@@ -25,6 +27,7 @@ public class BusinessNameDetectionServiceTests
         _service = new BusinessNameDetectionService(
             _indicatorServiceMock.Object,
             _wordProcessingServiceMock.Object,
+            _wordFrequencyServiceMock.Object,
             _loggerMock.Object);
     }
 

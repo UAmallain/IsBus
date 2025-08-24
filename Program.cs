@@ -31,11 +31,11 @@ builder.Services.AddCors(options =>
 });
 
 var connectionString = builder.Configuration.GetConnectionString("MariaDbConnection") 
-    ?? "Server=localhost;Database=phonebook_db;User=root;Password=;";
+    ?? "Server=localhost;Database=bor_db;User=root;Password=;";
 
 Log.Information("Using connection string: Server={Server};Database={Database}", 
     connectionString.Contains("localhost") ? "localhost" : "remote", 
-    "phonebook_db");
+    "bor_db");
 
 builder.Services.AddDbContext<PhonebookContext>(options =>
 {
@@ -61,6 +61,24 @@ builder.Services.AddSingleton<IBusinessIndicatorService, BusinessIndicatorServic
 builder.Services.AddScoped<IWordFrequencyService, WordFrequencyService>();
 builder.Services.AddScoped<IBusinessNameDetectionService, BusinessNameDetectionService>();
 builder.Services.AddScoped<IWordProcessingService, WordProcessingService>();
+// Use context-based classification if enabled in config
+var useContextClassification = builder.Configuration.GetValue<bool>("UseContextClassification", false);
+if (useContextClassification)
+{
+    builder.Services.AddScoped<IClassificationService, ContextClassificationService>();
+}
+else
+{
+    builder.Services.AddScoped<IClassificationService, ClassificationService>();
+}
+
+// Add community, street, and string parser services
+// Use ENHANCED services that query the database instead of hard-coded lists
+builder.Services.AddScoped<ICommunityService, CommunityService>();
+builder.Services.AddScoped<IStreetTypeService, EnhancedStreetTypeService>(); // Uses street_type_mapping table
+builder.Services.AddScoped<IStreetNameService, EnhancedStreetNameService>(); // Uses road_network table (2.25M+ records)
+builder.Services.AddScoped<IRoadNetworkStreetService, RoadNetworkStreetService>();
+builder.Services.AddScoped<IStringParserService, DatabaseDrivenParserService>(); // Database-driven parser that finds longest matching street
 
 builder.Services.AddHealthChecks();
     // Temporarily disabled to avoid startup issues
