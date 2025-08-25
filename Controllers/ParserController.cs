@@ -71,12 +71,20 @@ public class ParserController : ControllerBase
             });
         }
         
-        if (request.Inputs.Count > 100)
+        if (request.Inputs.Count > 500)
         {
             return BadRequest(new BatchParseResult
             {
                 TotalProcessed = 0,
-                FailureCount = 1
+                FailureCount = request.Inputs.Count,
+                Results = new List<ParseResult> 
+                { 
+                    new ParseResult 
+                    { 
+                        Success = false, 
+                        ErrorMessage = "Maximum 500 inputs allowed per batch" 
+                    } 
+                }
             });
         }
         

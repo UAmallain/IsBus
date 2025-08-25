@@ -20,7 +20,13 @@
       "Bash(pip install:*)",
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 66972)",
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 73568)",
-      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 32644)"
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 32644)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 51144)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 31672)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 31836)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 55416)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 29928)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 24604)"
     ],
     "deny": [],
     "ask": []

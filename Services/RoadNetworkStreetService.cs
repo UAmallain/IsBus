@@ -236,14 +236,28 @@ public class RoadNetworkStreetService : IRoadNetworkStreetService
         if (string.IsNullOrWhiteSpace(provinceCodeOrName))
             return null;
 
-        // Check if it's already a valid 2-char province code
+        // Check if it's already a numeric SGC code (like "13" for NB)
+        if (ProvinceCodeMapping.NumericToAlpha.ContainsKey(provinceCodeOrName))
+        {
+            return provinceCodeOrName; // Return the numeric code as-is
+        }
+
+        // Check if it's a 2-char province code (like "NB")
         if (provinceCodeOrName.Length == 2 && 
             ProvinceMapping.ProvinceCodeToName.ContainsKey(provinceCodeOrName.ToUpper()))
         {
-            return provinceCodeOrName.ToUpper();
+            // Convert to numeric SGC code for database query
+            return ProvinceCodeMapping.GetNumericCode(provinceCodeOrName.ToUpper());
         }
 
         // Try to resolve from province name
-        return ProvinceMapping.GetProvinceCode(provinceCodeOrName);
+        var alphaCode = ProvinceMapping.GetProvinceCode(provinceCodeOrName);
+        if (alphaCode != null)
+        {
+            // Convert to numeric SGC code for database query
+            return ProvinceCodeMapping.GetNumericCode(alphaCode);
+        }
+
+        return null;
     }
 }

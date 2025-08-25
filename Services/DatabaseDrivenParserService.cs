@@ -72,35 +72,211 @@ public class DatabaseDrivenParserService : IStringParserService
         
         // First, check if this is likely a business based on classification
         var preliminaryClassification = await _classificationService.ClassifyAsync(remainingText);
-        bool isLikelyBusiness = preliminaryClassification.IsBusiness && preliminaryClassification.Confidence >= 80;
+        // Lower threshold to catch more businesses like "A 1" patterns
+        bool isLikelyBusiness = preliminaryClassification.IsBusiness && preliminaryClassification.Confidence >= 40;
         
-        // For high-confidence business entries with no clear address indicators,
-        // treat the entire text as the business name
+        // Special cases that are always businesses
+        bool forceAsBusiness = false;
+        var wordsForCheck = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        
+        // "A 1" or "A-1" patterns are always businesses
+        // Also handle variations like "A1", "A #1", etc.
+        if (wordsForCheck.Length >= 2 && 
+            wordsForCheck[0].Equals("A", StringComparison.OrdinalIgnoreCase))
+        {
+            // Check if second word is "1" or contains "1"
+            if (wordsForCheck[1] == "1" || 
+                wordsForCheck[1] == "#1" || 
+                wordsForCheck[1] == "-1" ||
+                wordsForCheck[1].StartsWith("1"))
+            {
+                forceAsBusiness = true;
+                isLikelyBusiness = true; // Force as business
+            }
+        }
+        // Also check for "A-1" as a single word
+        else if (wordsForCheck.Length > 0 && 
+                 (wordsForCheck[0].Equals("A-1", StringComparison.OrdinalIgnoreCase) ||
+                  wordsForCheck[0].Equals("A1", StringComparison.OrdinalIgnoreCase)))
+        {
+            forceAsBusiness = true;
+            isLikelyBusiness = true; // Force as business
+        }
+        
+        _logger.LogInformation($"Text: '{remainingText}' - IsBusiness: {preliminaryClassification.IsBusiness}, Confidence: {preliminaryClassification.Confidence}, forceAsBusiness: {forceAsBusiness}, isLikelyBusiness: {isLikelyBusiness}");
+        
+        // For business entries, handle address detection carefully
         if (isLikelyBusiness)
         {
-            // Check if there are any clear address indicators (numbers, street types with numbers)
             var words = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            bool hasAddressIndicators = false;
+            int addressStartIndex = -1;
             
+            // Look for clear business terminators that often precede addresses
+            var businessTerminators = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
+                "LLC", "LLP", "Co", "Company", "Services", "Management", 
+                "Solutions", "Enterprises", "Industries", "Group"
+            };
+            
+            // Find the last business terminator - addresses often come after these
+            int lastTerminatorIndex = -1;
             for (int i = 0; i < words.Length; i++)
             {
-                // Check for street numbers
-                if (Regex.IsMatch(words[i], @"^\d+$"))
+                if (businessTerminators.Contains(words[i].Trim('.', ',')))
                 {
-                    hasAddressIndicators = true;
-                    break;
+                    lastTerminatorIndex = i;
+                }
+            }
+            
+            // Look for patterns that clearly indicate an address
+            for (int i = 0; i < words.Length; i++)
+            {
+                var word = words[i];
+                
+                // Check if this is a number (potential civic address)
+                if (Regex.IsMatch(word, @"^\d+$"))
+                {
+                    _logger.LogInformation($"Found number '{word}' at position {i}");
+                    
+                    // Special case: "A 1" pattern at the beginning - this is part of business name
+                    // Check if this is position 1 and previous word is "A"
+                    if (i == 1 && word == "1" && words[0].Equals("A", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _logger.LogInformation($"Skipping number '1' at position 1 because it follows 'A' (A 1 pattern)");
+                        // This is "A 1" pattern - skip looking for address at this number
+                        // But we need to find the REAL address number later
+                        continue;
+                    }
+                    
+                    // Skip if number is in parentheses (part of business name like "(1987)")
+                    if (i > 0 && (words[i - 1] == "(" || words[i - 1].EndsWith("(")))
+                        continue;
+                    
+                    // Skip if this comes before the last business terminator
+                    if (lastTerminatorIndex > i)
+                        continue;
+                    
+                    // Look ahead to see what follows this number
+                    bool looksLikeAddress = false;
+                    
+                    // First check immediate next word for street type
+                    if (i < words.Length - 1)
+                    {
+                        var nextWord = words[i + 1].Trim('.', ',');
+                        _logger.LogInformation($"Checking if next word '{nextWord}' is a street type...");
+                        
+                        // If next word is a street type, definitely an address
+                        if (_streetTypeService.IsStreetType(nextWord))
+                        {
+                            _logger.LogInformation($"Yes, '{nextWord}' is a street type!");
+                            looksLikeAddress = true;
+                        }
+                        // If it's another number (unit + civic)
+                        else if (Regex.IsMatch(nextWord, @"^\d+$"))
+                        {
+                            looksLikeAddress = true;
+                        }
+                        // Otherwise check if next word is a known street name by checking for street type later
+                        else if (!looksLikeAddress)
+                        {
+                            // Check the next few words for a street type
+                            for (int j = i + 2; j < Math.Min(i + 4, words.Length); j++)
+                            {
+                                var checkWord = words[j].Trim('.', ',');
+                                if (_streetTypeService.IsStreetType(checkWord))
+                                {
+                                    looksLikeAddress = true;
+                                    break;
+                                }
+                            }
+                            
+                            // If still not found, check if the next word could be a street name 
+                            // This is a weaker indicator, but use it if:
+                            // 1. The word is capitalized and longer than 2 chars
+                            // 2. We're after a business terminator OR
+                            // 3. We're after common business words like "Stores", "Insurance", etc
+                            if (!looksLikeAddress && char.IsUpper(nextWord[0]) && nextWord.Length > 2)
+                            {
+                                // Check if we're after a business terminator
+                                if (lastTerminatorIndex >= 0 && i > lastTerminatorIndex)
+                                {
+                                    _logger.LogInformation($"Number after business terminator, assuming '{nextWord}' is street name");
+                                    looksLikeAddress = true;
+                                }
+                                // Or check if previous word suggests this is an address
+                                else if (i > 0)
+                                {
+                                    var prevWord = words[i - 1].ToLower();
+                                    var businessContextWords = new HashSet<string> { 
+                                        "stores", "insurance", "services", "solutions", "management",
+                                        "moncton", "dieppe", "riverview", "fredericton", "saint" 
+                                    };
+                                    if (businessContextWords.Contains(prevWord))
+                                    {
+                                        _logger.LogInformation($"Number after '{prevWord}', assuming '{nextWord}' is street name");
+                                        looksLikeAddress = true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // If this number appears to start an address, use it
+                    if (looksLikeAddress)
+                    {
+                        _logger.LogInformation($"Number at position {i} looks like address start!");
+                        addressStartIndex = i;
+                        break;
+                    }
+                    else
+                    {
+                        _logger.LogInformation($"Number at position {i} doesn't look like address");
+                    }
                 }
                 // Check for unit indicators
-                if (Regex.IsMatch(words[i], @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase))
+                else if (Regex.IsMatch(word, @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase))
                 {
-                    hasAddressIndicators = true;
+                    addressStartIndex = i;
                     break;
                 }
             }
             
-            // If it's a business with no clear address indicators, keep it all as the name
-            if (!hasAddressIndicators)
+            // If we found an address, split the text
+            _logger.LogInformation($"Final addressStartIndex: {addressStartIndex}");
+            if (addressStartIndex >= 0)
             {
+                // Calculate character position for the split
+                int charPos = 0;
+                for (int j = 0; j < addressStartIndex; j++)
+                {
+                    charPos += words[j].Length + 1;
+                }
+                
+                // Handle edge case where charPos might be 0 or beyond string length
+                if (charPos > 0 && charPos < remainingText.Length)
+                {
+                    result.Name = remainingText.Substring(0, charPos).Trim();
+                    result.Address = remainingText.Substring(charPos).Trim();
+                }
+                else
+                {
+                    result.Name = remainingText;
+                    result.Address = "";
+                }
+                
+                result.IsBusinessName = true;
+                result.IsResidentialName = false;
+                result.Confidence.NameConfidence = preliminaryClassification.Confidence;
+                result.Confidence.AddressConfidence = 85;
+                result.Confidence.PhoneConfidence = 100;
+                result.Success = true;
+                
+                return result;
+            }
+            else
+            {
+                // No address found - keep entire text as business name
                 result.Name = remainingText;
                 result.Address = "";
                 result.IsBusinessName = true;
@@ -110,7 +286,6 @@ public class DatabaseDrivenParserService : IStringParserService
                 result.Confidence.PhoneConfidence = 100;
                 result.Success = true;
                 
-                _logger.LogInformation($"Parsed as business name only: '{input}' -> Name: '{result.Name}', Phone: '{result.Phone}'");
                 return result;
             }
         }
@@ -446,6 +621,14 @@ public class DatabaseDrivenParserService : IStringParserService
             // Check if previous word was a connector (& or "et" for names like "M & L" or "Louis et Marie")
             bool prevWasConnector = prevWord == "&" || prevWord.Equals("et", StringComparison.OrdinalIgnoreCase);
             
+            // Special handling for parenthetical numbers like (1987)
+            if (isNumber && i > 0 && prevWord == "(")
+            {
+                // This is a number in parentheses, likely part of the business name
+                _logger.LogDebug($"Number {word} in parentheses, treating as part of name");
+                continue;
+            }
+            
             if (isNumber || isUnit)
             {
                 // Definite address start
@@ -558,6 +741,13 @@ public class DatabaseDrivenParserService : IStringParserService
                     hasInitial = true;
                     lastNamePartIndex = i;
                     consecutiveNameWords++;
+                    
+                    // If this is the last word (no more words after), it's likely still part of the name
+                    // (e.g., "Adekunle Olatunbosun K 859-4399")
+                    if (i == words.Length - 1 || (i < words.Length - 1 && Regex.IsMatch(words[i + 1], @"^\d{3}-?\d{4}$")))
+                    {
+                        _logger.LogDebug($"Single letter '{word}' at end or before phone, treating as part of name");
+                    }
                 }
                 // Is this a connector (& or "et")?
                 else if (word == "&" || word.Equals("et", StringComparison.OrdinalIgnoreCase))
@@ -583,6 +773,22 @@ public class DatabaseDrivenParserService : IStringParserService
                 // Check if this word is in our name database
                 else if (!Regex.IsMatch(word, @"^\d+$"))
                 {
+                    // Special handling for business terminators like "Sons", "Ltd", "Inc"
+                    var businessTerminators = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
+                        "LLC", "LLP", "Sons", "Bros", "Brothers", "Co", "Company"
+                    };
+                    
+                    if (businessTerminators.Contains(wordLower))
+                    {
+                        // This is a business terminator, include it in the name
+                        lastNamePartIndex = i;
+                        consecutiveNameWords++;
+                        _logger.LogDebug($"Including business terminator '{word}' in name");
+                        continue;
+                    }
+                    
                     // Query word_data table to check if this is a name
                     var wordData = await _context.Set<WordData>()
                         .Where(w => w.WordLower == wordLower)
@@ -695,6 +901,34 @@ public class DatabaseDrivenParserService : IStringParserService
             addressParts.Add(words[i]);
         }
         result.Address = string.Join(" ", addressParts);
+        
+        // Special case: if the address is a single letter, it's likely an initial, not an address
+        if (result.Address.Length == 1 && char.IsLetter(result.Address[0]))
+        {
+            // Append to name instead
+            result.Name = result.Name + " " + result.Address;
+            result.Address = "";
+        }
+        // Special case: if address starts with clear business words like "Sons", include them in the name
+        else if (addressParts.Count > 0)
+        {
+            var firstAddressWord = addressParts[0].ToLower();
+            var businessSuffixes = new HashSet<string> { "sons", "bros", "brothers", "sisters", "and" };
+            
+            if (businessSuffixes.Contains(firstAddressWord))
+            {
+                // Move this word to the name
+                result.Name = result.Name + " " + addressParts[0];
+                if (addressParts.Count > 1)
+                {
+                    result.Address = string.Join(" ", addressParts.Skip(1));
+                }
+                else
+                {
+                    result.Address = "";
+                }
+            }
+        }
         
         // Mark as phonebook entry if we have a name
         if (!string.IsNullOrWhiteSpace(result.Name))

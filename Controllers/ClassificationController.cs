@@ -85,12 +85,12 @@ public class ClassificationController : ControllerBase
             });
         }
 
-        if (request.Inputs.Count > 100)
+        if (request.Inputs.Count > 500)
         {
             return BadRequest(new BatchClassificationResponse
             {
                 Success = false,
-                Message = "Maximum 100 inputs allowed per batch"
+                Message = "Maximum 500 inputs allowed per batch"
             });
         }
 
