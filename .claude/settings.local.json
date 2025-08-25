@@ -26,7 +26,14 @@
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 31836)",
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 55416)",
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 29928)",
-      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 24604)"
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 24604)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://localhost:5086\" --no-build)",
+      "Bash(ss:*)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 19632)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://localhost:5000\" --no-build)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 79068)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 68956)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 37084)"
     ],
     "deny": [],
     "ask": []

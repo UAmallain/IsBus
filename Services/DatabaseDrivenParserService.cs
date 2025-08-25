@@ -177,8 +177,37 @@ public class DatabaseDrivenParserService : IStringParserService
                         {
                             looksLikeAddress = true;
                         }
-                        // Otherwise check if next word is a known street name by checking for street type later
+                        // Check if this could be a known street name (even without type)
                         else if (!looksLikeAddress)
+                        {
+                            // Build potential street name from next words
+                            var potentialStreetNames = new List<string>();
+                            
+                            // Try single word
+                            potentialStreetNames.Add(nextWord);
+                            
+                            // Try multi-word combinations (up to 4 words for streets like "Filles De Jesus")
+                            for (int j = i + 2; j < Math.Min(i + 5, words.Length); j++)
+                            {
+                                var multiWordStreet = string.Join(" ", 
+                                    words.Skip(i + 1).Take(j - i).Select(w => w.Trim('.', ',')));
+                                potentialStreetNames.Add(multiWordStreet);
+                            }
+                            
+                            // Check each potential street name
+                            foreach (var streetName in potentialStreetNames)
+                            {
+                                if (await _streetNameService.IsKnownStreetNameAsync(streetName))
+                                {
+                                    _logger.LogInformation($"Found known street name: '{streetName}'");
+                                    looksLikeAddress = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // If still not found, check the original logic
+                        if (!looksLikeAddress)
                         {
                             // Check the next few words for a street type
                             for (int j = i + 2; j < Math.Min(i + 4, words.Length); j++)
@@ -276,13 +305,28 @@ public class DatabaseDrivenParserService : IStringParserService
             }
             else
             {
-                // No address found - keep entire text as business name
-                result.Name = remainingText;
-                result.Address = "";
+                // No address found - check if last word is a community
+                var lastWord = words[words.Length - 1].Trim('.', ',');
+                bool isCommunity = await _communityService.IsCommunityNameAsync(lastWord);
+                
+                if (isCommunity && words.Length > 1)
+                {
+                    // Split off the community as the address
+                    result.Name = string.Join(" ", words.Take(words.Length - 1));
+                    result.Address = lastWord;
+                    result.Confidence.AddressConfidence = 75; // Community only
+                }
+                else
+                {
+                    // No address found - keep entire text as business name
+                    result.Name = remainingText;
+                    result.Address = "";
+                    result.Confidence.AddressConfidence = 0;
+                }
+                
                 result.IsBusinessName = true;
                 result.IsResidentialName = false;
                 result.Confidence.NameConfidence = preliminaryClassification.Confidence;
-                result.Confidence.AddressConfidence = 0;
                 result.Confidence.PhoneConfidence = 100;
                 result.Success = true;
                 
@@ -1053,14 +1097,61 @@ public class DatabaseDrivenParserService : IStringParserService
     {
         var result = new PhoneExtractionResult();
         
-        // Try area code pattern first
+        // Try area code pattern first, but check if it's actually a road number
         var areaCodeMatch = _areaCodePhonePattern.Match(input);
         if (areaCodeMatch.Success)
         {
-            result.Phone = areaCodeMatch.Value.Trim();
-            result.RemainingText = input.Substring(0, areaCodeMatch.Index).Trim();
-            result.Success = true;
-            return result;
+            _logger.LogInformation($"Area code pattern matched: '{areaCodeMatch.Value}' at position {areaCodeMatch.Index}");
+            
+            // Before accepting this as an area code, check if the 3-digit number 
+            // is preceded by a road type indicator
+            var beforeMatch = input.Substring(0, areaCodeMatch.Index).Trim();
+            var words = beforeMatch.Split(' ');
+            
+            _logger.LogInformation($"Before match: '{beforeMatch}', Words count: {words.Length}");
+            
+            if (words.Length > 0)
+            {
+                var lastWord = words[^1].ToLower().TrimEnd('.', ',');
+                _logger.LogInformation($"Last word before area code: '{lastWord}'");
+                
+                // Road types that are followed by numbers (like Highway 205, Route 101)
+                var roadIndicators = new HashSet<string> { 
+                    "highway", "hwy", "route", "rte", "road", "rd", 
+                    "chemin", "ch", "autoroute", "aut"
+                };
+                
+                if (roadIndicators.Contains(lastWord))
+                {
+                    // This is a road number, not an area code
+                    // Just use the phone part without the road number
+                    _logger.LogInformation($"Detected road indicator '{lastWord}' before 3-digit number, not treating as area code");
+                    
+                    // Extract just the phone number (second part of the match)
+                    var phoneOnly = areaCodeMatch.Groups[2].Value.Trim();
+                    result.Phone = phoneOnly;
+                    result.RemainingText = input.Substring(0, areaCodeMatch.Index).Trim() + " " + areaCodeMatch.Groups[1].Value;
+                    result.Success = true;
+                    return result;
+                }
+                else
+                {
+                    // It's an area code
+                    _logger.LogInformation($"Accepting as area code: '{areaCodeMatch.Value}'");
+                    result.Phone = areaCodeMatch.Value.Trim();
+                    result.RemainingText = beforeMatch;
+                    result.Success = true;
+                    return result;
+                }
+            }
+            else
+            {
+                // No words before, accept as area code
+                result.Phone = areaCodeMatch.Value.Trim();
+                result.RemainingText = beforeMatch;
+                result.Success = true;
+                return result;
+            }
         }
         
         // Try standard phone pattern
@@ -1070,12 +1161,60 @@ public class DatabaseDrivenParserService : IStringParserService
             var phone = phoneMatch.Value.Trim();
             var remaining = input.Substring(0, phoneMatch.Index).Trim();
             
-            // Check for area code before phone
+            // Check for area code or suite/unit number before phone
             var words = remaining.Split(' ');
-            if (words.Length > 0 && Regex.IsMatch(words[^1], @"^\d{3}$"))
+            if (words.Length > 0)
             {
-                result.Phone = $"{words[^1]} {phone}";
-                result.RemainingText = string.Join(" ", words.Take(words.Length - 1));
+                var lastWord = words[^1];
+                
+                // Check if last word is a 3-digit number that could be area code or suite
+                if (Regex.IsMatch(lastWord, @"^\d{3}$"))
+                {
+                    // Check if word before the number indicates it's a suite/unit
+                    if (words.Length > 1)
+                    {
+                        var prevWord = words[^2].ToLower().TrimEnd('.', ',');
+                        // Suite indicators and road types that are followed by numbers
+                        // The number stays with the address, not the phone
+                        var suiteIndicators = new HashSet<string> { 
+                            // Suite/unit indicators
+                            "suite", "ste", "unit", "apt", "apartment", "room", "rm", "floor", "fl",
+                            // Road types that are followed by numbers (like Highway 205, Route 101)
+                            "highway", "hwy", "route", "rte", "road", "rd", "street", "st",
+                            "avenue", "ave", "av", "boulevard", "blvd", "drive", "dr",
+                            "lane", "ln", "place", "pl", "court", "ct", "circle", "cir",
+                            "trail", "tr", "path", "parkway", "pkwy", "way",
+                            // French road types
+                            "chemin", "ch", "rue", "autoroute", "aut", "voie"
+                        };
+                        
+                        _logger.LogDebug($"Checking if '{prevWord}' is a suite/road indicator (3-digit number: {lastWord})");
+                        
+                        if (suiteIndicators.Contains(prevWord))
+                        {
+                            // This is a suite/unit number, not an area code
+                            result.Phone = phone;
+                            result.RemainingText = remaining;
+                        }
+                        else
+                        {
+                            // Likely an area code
+                            result.Phone = $"{lastWord} {phone}";
+                            result.RemainingText = string.Join(" ", words.Take(words.Length - 1));
+                        }
+                    }
+                    else
+                    {
+                        // Only one word before phone, assume it's area code
+                        result.Phone = $"{lastWord} {phone}";
+                        result.RemainingText = string.Join(" ", words.Take(words.Length - 1));
+                    }
+                }
+                else
+                {
+                    result.Phone = phone;
+                    result.RemainingText = remaining;
+                }
             }
             else
             {
