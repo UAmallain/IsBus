@@ -33,7 +33,8 @@
       "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://localhost:5000\" --no-build)",
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 79068)",
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 68956)",
-      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 37084)"
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 37084)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" build --no-incremental)"
     ],
     "deny": [],
     "ask": []

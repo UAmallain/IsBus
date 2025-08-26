@@ -55,8 +55,20 @@ public class DatabaseDrivenParserService : IStringParserService
             return result;
         }
         
-        // Normalize input
-        input = Regex.Replace(input.Trim(), @"\s+", " ");
+        // Special case: Remove "Composez sans frais / Call no charge 1" if present anywhere in the input
+        // Use regex to handle variations in spacing and punctuation
+        var tollFreePattern = @"Composez\s+sans\s+frais\s*/\s*Call\s+no\s+charge\s*\.?\s*1";
+        var tollFreeMatch = Regex.Match(input, tollFreePattern, RegexOptions.IgnoreCase);
+        if (tollFreeMatch.Success)
+        {
+            // Remove the toll-free text from wherever it appears
+            input = input.Remove(tollFreeMatch.Index, tollFreeMatch.Length).Trim();
+            _logger.LogDebug($"Removed toll-free text, remaining: '{input}'");
+        }
+        
+        // Normalize input - remove underscores and collapse multiple spaces
+        input = input.Replace('_', ' '); // Replace underscores with spaces
+        input = Regex.Replace(input.Trim(), @"\s+", " "); // Collapse multiple spaces to single space
         
         // Step 1: Extract phone number
         var phoneExtraction = ExtractPhoneNumber(input);
@@ -79,9 +91,49 @@ public class DatabaseDrivenParserService : IStringParserService
         bool forceAsBusiness = false;
         var wordsForCheck = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         
-        // "A 1" or "A-1" patterns are always businesses
+        // Check for residential name pattern: "initial surname initial" (e.g., "A Mwinkeu C")
+        // This should NOT be forced as business even if it starts with "A"
+        bool looksLikeResidentialWithInitials = false;
+        if (wordsForCheck.Length == 3)
+        {
+            // Check if first and last are single letters (initials)
+            bool firstIsInitial = wordsForCheck[0].Length == 1 && char.IsLetter(wordsForCheck[0][0]);
+            bool lastIsInitial = wordsForCheck[2].Length == 1 && char.IsLetter(wordsForCheck[2][0]);
+            bool middleIsName = wordsForCheck[1].Length > 1 && char.IsLetter(wordsForCheck[1][0]);
+            
+            if (firstIsInitial && lastIsInitial && middleIsName)
+            {
+                looksLikeResidentialWithInitials = true;
+                _logger.LogDebug($"Detected residential pattern 'initial surname initial': {remainingText}");
+            }
+        }
+        
+        // Check for business terminators that definitively indicate a business
+        var businessIndicators = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
+            "LLC", "LLP", "Sons", "Bros", "Brothers", "Co", "Company"
+        };
+        
+        // Check if any word is a business terminator (but skip if it looks like residential with initials)
+        if (!looksLikeResidentialWithInitials)
+        {
+            foreach (var word in wordsForCheck)
+            {
+                if (businessIndicators.Contains(word.Trim('.', ',')))
+                {
+                    forceAsBusiness = true;
+                    isLikelyBusiness = true;
+                    _logger.LogDebug($"Found business terminator '{word}', forcing as business");
+                    break;
+                }
+            }
+        }
+        
+        // "A 1" or "A-1" patterns are always businesses (but not if it's a residential pattern)
         // Also handle variations like "A1", "A #1", etc.
-        if (wordsForCheck.Length >= 2 && 
+        if (!forceAsBusiness && !looksLikeResidentialWithInitials && 
+            wordsForCheck.Length >= 2 && 
             wordsForCheck[0].Equals("A", StringComparison.OrdinalIgnoreCase))
         {
             // Check if second word is "1" or contains "1"
@@ -95,7 +147,8 @@ public class DatabaseDrivenParserService : IStringParserService
             }
         }
         // Also check for "A-1" as a single word
-        else if (wordsForCheck.Length > 0 && 
+        else if (!forceAsBusiness && !looksLikeResidentialWithInitials && 
+                 wordsForCheck.Length > 0 && 
                  (wordsForCheck[0].Equals("A-1", StringComparison.OrdinalIgnoreCase) ||
                   wordsForCheck[0].Equals("A1", StringComparison.OrdinalIgnoreCase)))
         {
@@ -103,10 +156,10 @@ public class DatabaseDrivenParserService : IStringParserService
             isLikelyBusiness = true; // Force as business
         }
         
-        _logger.LogInformation($"Text: '{remainingText}' - IsBusiness: {preliminaryClassification.IsBusiness}, Confidence: {preliminaryClassification.Confidence}, forceAsBusiness: {forceAsBusiness}, isLikelyBusiness: {isLikelyBusiness}");
+        _logger.LogInformation($"Text: '{remainingText}' - IsBusiness: {preliminaryClassification.IsBusiness}, Confidence: {preliminaryClassification.Confidence}, forceAsBusiness: {forceAsBusiness}, isLikelyBusiness: {isLikelyBusiness}, looksLikeResidentialWithInitials: {looksLikeResidentialWithInitials}");
         
-        // For business entries, handle address detection carefully
-        if (isLikelyBusiness)
+        // For business entries, handle address detection carefully (skip if it's clearly residential)
+        if (isLikelyBusiness && !looksLikeResidentialWithInitials)
         {
             var words = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             int addressStartIndex = -1;
@@ -115,7 +168,7 @@ public class DatabaseDrivenParserService : IStringParserService
             var businessTerminators = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
-                "LLC", "LLP", "Co", "Company", "Services", "Management", 
+                "LLC", "LLP", "Co", "Company", "Services", "Service", "Management", 
                 "Solutions", "Enterprises", "Industries", "Group"
             };
             
@@ -305,20 +358,40 @@ public class DatabaseDrivenParserService : IStringParserService
             }
             else
             {
-                // No address found - check if last word is a community
-                var lastWord = words[words.Length - 1].Trim('.', ',');
-                bool isCommunity = await _communityService.IsCommunityNameAsync(lastWord);
+                // Before checking for communities, check if the last word is a business terminator
+                // Business terminators should not be treated as addresses
+                var lastWordToCheck = words.Length > 0 ? words[^1].Trim('.', ',') : "";
                 
-                if (isCommunity && words.Length > 1)
+                var businessEndings = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    // Split off the community as the address
-                    result.Name = string.Join(" ", words.Take(words.Length - 1));
-                    result.Address = lastWord;
-                    result.Confidence.AddressConfidence = 75; // Community only
+                    "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
+                    "LLC", "LLP", "Sons", "Bros", "Brothers", "Co", "Company"
+                };
+                
+                // Only check for communities if the last word is NOT a business terminator
+                if (!businessEndings.Contains(lastWordToCheck))
+                {
+                    // No address found - check if the end contains a community (handles multi-word communities)
+                    var communityResult = await _communityService.FindCommunityAtEndAsync(remainingText, province);
+                    
+                    if (communityResult.Found && communityResult.StartIndex > 0)
+                    {
+                        // Split off the community as the address
+                        result.Name = remainingText.Substring(0, communityResult.StartIndex).Trim();
+                        result.Address = communityResult.CommunityName ?? "";
+                        result.Confidence.AddressConfidence = 75; // Community only
+                    }
+                    else
+                    {
+                        // No address found - keep entire text as business name
+                        result.Name = remainingText;
+                        result.Address = "";
+                        result.Confidence.AddressConfidence = 0;
+                    }
                 }
                 else
                 {
-                    // No address found - keep entire text as business name
+                    // Business terminator found - keep entire text as business name
                     result.Name = remainingText;
                     result.Address = "";
                     result.Confidence.AddressConfidence = 0;
@@ -584,6 +657,7 @@ public class DatabaseDrivenParserService : IStringParserService
         // BUT ONLY if there are no clear address indicators (numbers, street types)
         // This helps identify patterns like "Name Initial Community Phone"
         int communityIndex = -1;
+        string? communityName = null;
         
         // First scan: check if there are any numbers or street indicators in the middle
         bool hasAddressIndicators = false;
@@ -598,37 +672,38 @@ public class DatabaseDrivenParserService : IStringParserService
         }
         
         // Only check for community if there are NO other address indicators
-        if (!hasAddressIndicators)
+        if (!hasAddressIndicators && words.Length >= 3) // Need at least 3 words for name + community
         {
-            for (int i = words.Length - 1; i >= 2; i--) // Start from end, but ensure at least 2 words before (for name)
+            // Check for multi-word communities at the end
+            // Try 3 words, then 2, then 1
+            for (int wordsToCheck = Math.Min(3, words.Length - 2); wordsToCheck >= 1; wordsToCheck--)
             {
-                var word = words[i];
-                // Skip if this looks like a phone number
-                if (Regex.IsMatch(word, @"^\d{3}-?\d{4}$") || Regex.IsMatch(word, @"^\d{3}$"))
+                // Skip if any of these words look like phone numbers
+                bool hasPhoneNumber = false;
+                for (int j = words.Length - wordsToCheck; j < words.Length; j++)
                 {
-                    continue;
+                    if (Regex.IsMatch(words[j], @"^\d{3}-?\d{4}$") || Regex.IsMatch(words[j], @"^\d{3}$"))
+                    {
+                        hasPhoneNumber = true;
+                        break;
+                    }
                 }
                 
-                // Check if this is a community name
-                bool isCommunity = await _communityService.IsCommunityNameAsync(word, province);
-                if (isCommunity)
+                if (hasPhoneNumber)
+                    continue;
+                
+                var potentialCommunity = string.Join(" ", words.Skip(words.Length - wordsToCheck).Take(wordsToCheck));
+                if (await _communityService.IsCommunityNameAsync(potentialCommunity, province))
                 {
                     // Make sure we have at least a proper name before it (2+ parts)
-                    // Count non-phone words before this position
-                    int nameWordCount = 0;
-                    for (int j = 0; j < i; j++)
-                    {
-                        if (!Regex.IsMatch(words[j], @"^\d{3}-?\d{4}$"))
-                        {
-                            nameWordCount++;
-                        }
-                    }
+                    int nameWordCount = words.Length - wordsToCheck;
                     
                     // Need at least 2 name parts (last name + first name/initial)
                     if (nameWordCount >= 2)
                     {
-                        communityIndex = i;
-                        _logger.LogDebug($"Found community '{word}' at position {i} with {nameWordCount} name words before it");
+                        communityIndex = words.Length - wordsToCheck;
+                        communityName = potentialCommunity;
+                        _logger.LogDebug($"Found community '{potentialCommunity}' starting at position {communityIndex} with {nameWordCount} name words before it");
                         break;
                     }
                 }

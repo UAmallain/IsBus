@@ -39,8 +39,11 @@ public class WordFrequencyService : IWordFrequencyService
             
             lookupWords = lookupWords.Distinct().ToList();
             
-            var frequencies = await _context.Words
+            // Group by word_lower to handle duplicates, taking the max count
+            var frequencies = await _context.WordData
                 .Where(w => lookupWords.Contains(w.WordLower))
+                .GroupBy(w => w.WordLower)
+                .Select(g => new { WordLower = g.Key, WordCount = g.Max(w => w.WordCount) })
                 .ToDictionaryAsync(w => w.WordLower, w => w.WordCount);
 
             // Map back to original words
@@ -74,7 +77,7 @@ public class WordFrequencyService : IWordFrequencyService
             {
                 entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
                 
-                return await _context.Words
+                return await _context.WordData
                     .Where(w => w.WordCount >= threshold)
                     .Select(w => w.WordLower)
                     .ToListAsync();

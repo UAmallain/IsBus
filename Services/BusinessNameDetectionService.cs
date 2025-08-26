@@ -41,7 +41,7 @@ public class BusinessNameDetectionService : IBusinessNameDetectionService
         var response = new BusinessNameCheckResponse
         {
             Input = input,
-            IsBusinessName = scoringResult.Confidence >= 65,  // Lowered from 70 to 65
+            IsBusinessName = scoringResult.Confidence >= 55,  // Lowered from 65 to 55 for better detection
             Confidence = Math.Round(scoringResult.Confidence, 1),
             MatchedIndicators = scoringResult.MatchedIndicators,
             WordsProcessed = 0
@@ -89,6 +89,12 @@ public class BusinessNameDetectionService : IBusinessNameDetectionService
 
         // Get word frequencies from database - THIS IS THE KEY PART!
         var wordFrequencies = await _frequencyService.GetWordFrequenciesAsync(words);
+        
+        // Log if we didn't get any word frequencies (database lookup failed)
+        if (!wordFrequencies.Any() || wordFrequencies.Values.All(v => v == 0))
+        {
+            _logger.LogWarning("No word frequencies retrieved from database for: {Words}", string.Join(", ", words));
+        }
         
         // Calculate database-based score FIRST
         score += CalculateDatabaseScore(words, wordFrequencies, matchedIndicators);
@@ -195,9 +201,26 @@ public class BusinessNameDetectionService : IBusinessNameDetectionService
             }
             else if (_indicatorService.IsSecondaryIndicator(word))
             {
-                // First secondary indicator gets full points, subsequent ones get less
-                score += (secondaryCount == 0) ? 20 : 10;  // Increased from 15
-                matchedIndicators.Add(word);
+                // Hospitality and retail indicators are VERY strong signals
+                var strongBusinessWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase) 
+                {
+                    "Inn", "Hotel", "Motel", "Lodge", "Resort", "Suites",
+                    "Restaurant", "Cafe", "Bistro", "Bar", "Pub", "Grill",
+                    "Store", "Shop", "Mart", "Market", "Pharmacy", "Clinic",
+                    "Bank", "Motors", "Auto", "Garage", "Pizza", "Dental"
+                };
+                
+                if (strongBusinessWords.Contains(word))
+                {
+                    score += 35;  // Strong business words get extra weight
+                    matchedIndicators.Add($"{word} (strong)");
+                }
+                else
+                {
+                    // First secondary indicator gets full points, subsequent ones get less
+                    score += (secondaryCount == 0) ? 20 : 10;
+                    matchedIndicators.Add(word);
+                }
                 secondaryCount++;
             }
         }

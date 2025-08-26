@@ -299,10 +299,10 @@ public class ClassificationService : IClassificationService
                 const int MIN_NAME_COUNT = 10;
                 
                 // Also check business word counts
-                var word0Business = await _context.Words
-                    .FirstOrDefaultAsync(w => w.WordLower == words[0].ToLower());
-                var word1Business = await _context.Words
-                    .FirstOrDefaultAsync(w => w.WordLower == words[1].ToLower());
+                var word0Business = await _context.WordData
+                    .FirstOrDefaultAsync(w => w.WordLower == words[0].ToLower() && w.WordType == "business");
+                var word1Business = await _context.WordData
+                    .FirstOrDefaultAsync(w => w.WordLower == words[1].ToLower() && w.WordType == "business");
                 
                 // If either word is overwhelmingly business (50x more), not residential
                 if ((word0Business != null && word0MaxCount < MIN_NAME_COUNT && word0Business.WordCount > word0MaxCount * 20) ||
@@ -448,10 +448,10 @@ public class ClassificationService : IClassificationService
                 var word1MaxCount = word1Names.Max(n => n.NameCount);
                 
                 // Check business word counts too
-                var word0Business = await _context.Words
-                    .FirstOrDefaultAsync(w => w.WordLower == words[0].ToLower());
-                var word1Business = await _context.Words
-                    .FirstOrDefaultAsync(w => w.WordLower == words[1].ToLower());
+                var word0Business = await _context.WordData
+                    .FirstOrDefaultAsync(w => w.WordLower == words[0].ToLower() && w.WordType == "business");
+                var word1Business = await _context.WordData
+                    .FirstOrDefaultAsync(w => w.WordLower == words[1].ToLower() && w.WordType == "business");
                 
                 // Don't treat as valid name pattern if words are overwhelmingly business
                 bool word0IsRealName = word0MaxCount >= MIN_NAME_COUNT || 
@@ -487,8 +487,8 @@ public class ClassificationService : IClassificationService
             var word = words[i].ToLower();
             
             // Check words table (business keywords)
-            var businessWord = await _context.Words
-                .FirstOrDefaultAsync(w => w.WordLower == word);
+            var businessWord = await _context.WordData
+                .FirstOrDefaultAsync(w => w.WordLower == word && w.WordType == "business");
             
             // Check names table - get ALL entries for this word
             var names = await _context.Names

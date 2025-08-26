@@ -68,8 +68,8 @@ public class WordProcessingService : IWordProcessingService
             {
                 var wordsList = wordsToProcess.Keys.ToList();
                 
-                var existingWords = await _context.Words
-                    .Where(w => wordsList.Contains(w.WordLower))
+                var existingWords = await _context.WordData
+                    .Where(w => wordsList.Contains(w.WordLower) && w.WordType == "business")
                     .ToListAsync();
 
                 foreach (var existingWord in existingWords)
@@ -77,19 +77,25 @@ public class WordProcessingService : IWordProcessingService
                     if (wordsToProcess.TryGetValue(existingWord.WordLower, out var count))
                     {
                         existingWord.WordCount += count;
+                        existingWord.LastSeen = DateTime.Now;
+                        existingWord.UpdatedAt = DateTime.Now;
                         wordsToProcess.Remove(existingWord.WordLower);
                     }
                 }
 
-                var newWords = wordsToProcess.Select(kvp => new Word
+                var newWords = wordsToProcess.Select(kvp => new WordData
                 {
                     WordLower = kvp.Key,
-                    WordCount = kvp.Value
+                    WordType = "business",
+                    WordCount = kvp.Value,
+                    LastSeen = DateTime.Now,
+                    CreatedAt = DateTime.Now,
+                    UpdatedAt = DateTime.Now
                 }).ToList();
 
                 if (newWords.Any())
                 {
-                    await _context.Words.AddRangeAsync(newWords);
+                    await _context.WordData.AddRangeAsync(newWords);
                 }
 
                 await _context.SaveChangesAsync();
