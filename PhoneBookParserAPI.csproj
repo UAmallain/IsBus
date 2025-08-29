@@ -21,10 +21,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="IsBus.Tests\**" />
-    <Content Remove="IsBus.Tests\**" />
-    <EmbeddedResource Remove="IsBus.Tests\**" />
-    <None Remove="IsBus.Tests\**" />
+    <Compile Remove="PhoneBookParserAPI.Tests\**" />
+    <Content Remove="PhoneBookParserAPI.Tests\**" />
+    <EmbeddedResource Remove="PhoneBookParserAPI.Tests\**" />
+    <None Remove="PhoneBookParserAPI.Tests\**" />
     <Compile Remove="Tests\**" />
     <Content Remove="Tests\**" />
     <EmbeddedResource Remove="Tests\**" />

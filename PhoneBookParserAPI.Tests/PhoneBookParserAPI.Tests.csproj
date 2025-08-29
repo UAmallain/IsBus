@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\IsBus.csproj" />
+    <ProjectReference Include="..\PhoneBookParserAPI.csproj" />
   </ItemGroup>
 
 </Project>
