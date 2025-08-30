@@ -40,7 +40,19 @@
       "Read(/mnt/c/Users/mallain/Source/repos/PhoneBookParserAPI/**)",
       "Read(/mnt/c/Users/mallain/Source/repos/PhoneBookParserAPI/**)",
       "Read(/mnt/c/Users/mallain/Source/repos/PhoneBookParserAPI/**)",
-      "Read(/mnt/c/Users/mallain/Source/repos/PhoneBookParserAPI/**)"
+      "Read(/mnt/c/Users/mallain/Source/repos/PhoneBookParserAPI/**)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 49564)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 4612)",
+      "Bash(dotnet script:*)",
+      "Bash(csharp:*)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run TestNameSplit.cs)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 42644)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 47152)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 46644)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 15948)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://0.0.0.0:5086\")",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://0.0.0.0:5086\" --no-build)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run test_abraham_debug.cs)"
     ],
     "deny": [],
     "ask": []

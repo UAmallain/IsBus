@@ -1,0 +1,11 @@
+[
+  {
+    "input": "Abraham Kaine 17 Kingsmere 388-3515",
+    "expectedName": "Abraham Kaine",
+    "expectedAddress": "17 Kingsmere",
+    "expectedPhone": "5063883515",
+    "expectedIsBusinessName": false,
+    "expectedIsResidentialName": true,
+    "description": "Abraham has higher name counts (first:320) than business (57), Kaine has higher name counts (last:46) than business (4)"
+  }
+]

@@ -61,6 +61,7 @@ builder.Services.AddSingleton<IBusinessIndicatorService, BusinessIndicatorServic
 builder.Services.AddScoped<IWordFrequencyService, WordFrequencyService>();
 builder.Services.AddScoped<IBusinessNameDetectionService, BusinessNameDetectionService>();
 builder.Services.AddScoped<IWordProcessingService, WordProcessingService>();
+builder.Services.AddScoped<IBusinessWordService, BusinessWordService>();
 // Use context-based classification if enabled in config
 var useContextClassification = builder.Configuration.GetValue<bool>("UseContextClassification", false);
 if (useContextClassification)

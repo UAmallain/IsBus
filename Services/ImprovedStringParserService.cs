@@ -53,7 +53,7 @@ public class ImprovedStringParserService : IStringParserService
         _logger = logger;
     }
     
-    public async Task<ParseResult> ParseAsync(string input, string? province = null)
+    public async Task<ParseResult> ParseAsync(string input, string? province = null, string? areaCode = null)
     {
         var result = new ParseResult { Input = input };
         
@@ -352,13 +352,13 @@ public class ImprovedStringParserService : IStringParserService
         return result;
     }
     
-    public async Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null)
+    public async Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null, string? areaCode = null)
     {
         var result = new BatchParseResult();
         
         foreach (var input in inputs)
         {
-            var parseResult = await ParseAsync(input, province);
+            var parseResult = await ParseAsync(input, province, areaCode);
             result.Results.Add(parseResult);
             
             if (parseResult.Success)

@@ -1,0 +1,37 @@
+[
+  {
+    "input": "M Allain 54 Petersfield St 388-6232",
+    "expectedLastName": "Allain",
+    "expectedFirstName": "M",
+    "expectedAddress": "54 Petersfield St",
+    "expectedPhone": "388-6232"
+  },
+  {
+    "input": "Smith John & Mary 123 Main St 555-1234",
+    "expectedLastName": "Smith",
+    "expectedFirstName": "John & Mary",
+    "expectedAddress": "123 Main St",
+    "expectedPhone": "555-1234"
+  },
+  {
+    "input": "Johnson A B 456 Oak Ave 555-5678",
+    "expectedLastName": "Johnson",
+    "expectedFirstName": "A B",
+    "expectedAddress": "456 Oak Ave",
+    "expectedPhone": "555-5678"
+  },
+  {
+    "input": "R Johnson 789 Pine Rd 555-9012",
+    "expectedLastName": "Johnson",
+    "expectedFirstName": "R",
+    "expectedAddress": "789 Pine Rd",
+    "expectedPhone": "555-9012"
+  },
+  {
+    "input": "Williams Robert & Susan 321 Elm St 555-3456",
+    "expectedLastName": "Williams",
+    "expectedFirstName": "Robert & Susan",
+    "expectedAddress": "321 Elm St",
+    "expectedPhone": "555-3456"
+  }
+]

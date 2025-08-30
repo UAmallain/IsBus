@@ -16,6 +16,7 @@ public class DatabaseDrivenParserService : IStringParserService
     private readonly ICommunityService _communityService;
     private readonly IStreetTypeService _streetTypeService;
     private readonly IStreetNameService _streetNameService;
+    private readonly IBusinessWordService _businessWordService;
     private readonly PhonebookContext _context;
     private readonly ILogger<DatabaseDrivenParserService> _logger;
     
@@ -33,6 +34,7 @@ public class DatabaseDrivenParserService : IStringParserService
         ICommunityService communityService,
         IStreetTypeService streetTypeService,
         IStreetNameService streetNameService,
+        IBusinessWordService businessWordService,
         PhonebookContext context,
         ILogger<DatabaseDrivenParserService> logger)
     {
@@ -40,11 +42,12 @@ public class DatabaseDrivenParserService : IStringParserService
         _communityService = communityService;
         _streetTypeService = streetTypeService;
         _streetNameService = streetNameService;
+        _businessWordService = businessWordService;
         _context = context;
         _logger = logger;
     }
     
-    public async Task<ParseResult> ParseAsync(string input, string? province = null)
+    public async Task<ParseResult> ParseAsync(string input, string? province = null, string? areaCode = null)
     {
         var result = new ParseResult { Input = input };
         
@@ -71,7 +74,7 @@ public class DatabaseDrivenParserService : IStringParserService
         input = Regex.Replace(input.Trim(), @"\s+", " "); // Collapse multiple spaces to single space
         
         // Step 1: Extract phone number
-        var phoneExtraction = ExtractPhoneNumber(input);
+        var phoneExtraction = ExtractPhoneNumber(input, areaCode);
         if (!phoneExtraction.Success)
         {
             result.Success = false;
@@ -82,51 +85,69 @@ public class DatabaseDrivenParserService : IStringParserService
         result.Phone = phoneExtraction.Phone;
         var remainingText = phoneExtraction.RemainingText.Trim();
         
-        // First, check if this is likely a business based on classification
-        var preliminaryClassification = await _classificationService.ClassifyAsync(remainingText);
-        // Lower threshold to catch more businesses like "A 1" patterns
-        bool isLikelyBusiness = preliminaryClassification.IsBusiness && preliminaryClassification.Confidence >= 40;
+        // Don't do preliminary classification on the full text as it includes the address
+        // We'll classify after extracting the address
+        bool isLikelyBusiness = false;
         
         // Special cases that are always businesses
         bool forceAsBusiness = false;
         var wordsForCheck = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         
-        // Check for residential name pattern: "initial surname initial" (e.g., "A Mwinkeu C")
+        // Check for residential name patterns with initials
         // This should NOT be forced as business even if it starts with "A"
         bool looksLikeResidentialWithInitials = false;
+        string residentialInitialPattern = "";
+        
         if (wordsForCheck.Length == 3)
         {
             // Check if first and last are single letters (initials)
-            bool firstIsInitial = wordsForCheck[0].Length == 1 && char.IsLetter(wordsForCheck[0][0]);
-            bool lastIsInitial = wordsForCheck[2].Length == 1 && char.IsLetter(wordsForCheck[2][0]);
-            bool middleIsName = wordsForCheck[1].Length > 1 && char.IsLetter(wordsForCheck[1][0]);
+            bool firstIsInitial = wordsForCheck[0].Length <= 2 && wordsForCheck[0].All(c => char.IsLetter(c) || c == '.');
+            bool lastIsInitial = wordsForCheck[2].Length <= 2 && wordsForCheck[2].All(c => char.IsLetter(c) || c == '.');
+            bool middleIsName = wordsForCheck[1].Length > 2 && char.IsLetter(wordsForCheck[1][0]);
+            
+            // Also check for "Initial Initial Surname" pattern
+            bool secondIsInitial = wordsForCheck[1].Length <= 2 && wordsForCheck[1].All(c => char.IsLetter(c) || c == '.');
+            bool lastIsName = wordsForCheck[2].Length > 2 && char.IsLetter(wordsForCheck[2][0]);
             
             if (firstIsInitial && lastIsInitial && middleIsName)
             {
                 looksLikeResidentialWithInitials = true;
+                residentialInitialPattern = "initial-surname-initial";
                 _logger.LogDebug($"Detected residential pattern 'initial surname initial': {remainingText}");
+            }
+            else if (firstIsInitial && secondIsInitial && lastIsName)
+            {
+                looksLikeResidentialWithInitials = true;
+                residentialInitialPattern = "initial-initial-surname";
+                _logger.LogDebug($"Detected residential pattern 'initial initial surname': {remainingText}");
             }
         }
         
-        // Check for business terminators that definitively indicate a business
-        var businessIndicators = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
-            "LLC", "LLP", "Sons", "Bros", "Brothers", "Co", "Company"
-        };
+        // Use BusinessWordService to analyze the phrase for business indicators
+        var businessAnalysis = await _businessWordService.AnalyzePhraseAsync(remainingText);
         
-        // Check if any word is a business terminator (but skip if it looks like residential with initials)
-        if (!looksLikeResidentialWithInitials)
+        // Check if we have strong business indicators
+        bool hasStrongBusinessWords = businessAnalysis.isBusiness && 
+                                      businessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong;
+        
+        if (hasStrongBusinessWords)
         {
-            foreach (var word in wordsForCheck)
+            forceAsBusiness = true;
+            isLikelyBusiness = true;
+            looksLikeResidentialWithInitials = false; // Override any residential pattern
+            _logger.LogDebug($"Business analysis: {businessAnalysis.reason}");
+        }
+        
+        // Also check for corporate suffixes which are absolute indicators
+        foreach (var word in wordsForCheck)
+        {
+            if (await _businessWordService.IsCorporateSuffixAsync(word))
             {
-                if (businessIndicators.Contains(word.Trim('.', ',')))
-                {
-                    forceAsBusiness = true;
-                    isLikelyBusiness = true;
-                    _logger.LogDebug($"Found business terminator '{word}', forcing as business");
-                    break;
-                }
+                forceAsBusiness = true;
+                isLikelyBusiness = true;
+                looksLikeResidentialWithInitials = false;
+                _logger.LogDebug($"Found corporate suffix '{word}', forcing as business");
+                break;
             }
         }
         
@@ -156,7 +177,7 @@ public class DatabaseDrivenParserService : IStringParserService
             isLikelyBusiness = true; // Force as business
         }
         
-        _logger.LogInformation($"Text: '{remainingText}' - IsBusiness: {preliminaryClassification.IsBusiness}, Confidence: {preliminaryClassification.Confidence}, forceAsBusiness: {forceAsBusiness}, isLikelyBusiness: {isLikelyBusiness}, looksLikeResidentialWithInitials: {looksLikeResidentialWithInitials}");
+        _logger.LogInformation($"Text: '{remainingText}' - forceAsBusiness: {forceAsBusiness}, isLikelyBusiness: {isLikelyBusiness}, looksLikeResidentialWithInitials: {looksLikeResidentialWithInitials}");
         
         // For business entries, handle address detection carefully (skip if it's clearly residential)
         if (isLikelyBusiness && !looksLikeResidentialWithInitials)
@@ -165,18 +186,12 @@ public class DatabaseDrivenParserService : IStringParserService
             int addressStartIndex = -1;
             
             // Look for clear business terminators that often precede addresses
-            var businessTerminators = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
-                "LLC", "LLP", "Co", "Company", "Services", "Service", "Management", 
-                "Solutions", "Enterprises", "Industries", "Group"
-            };
-            
-            // Find the last business terminator - addresses often come after these
+            // Check for corporate suffixes that indicate addresses often come after these
             int lastTerminatorIndex = -1;
             for (int i = 0; i < words.Length; i++)
             {
-                if (businessTerminators.Contains(words[i].Trim('.', ',')))
+                var cleanWord = words[i].Trim('.', ',');
+                if (await _businessWordService.IsCorporateSuffixAsync(cleanWord))
                 {
                     lastTerminatorIndex = i;
                 }
@@ -349,7 +364,7 @@ public class DatabaseDrivenParserService : IStringParserService
                 
                 result.IsBusinessName = true;
                 result.IsResidentialName = false;
-                result.Confidence.NameConfidence = preliminaryClassification.Confidence;
+                result.Confidence.NameConfidence = 85; // Default confidence for forced business
                 result.Confidence.AddressConfidence = 85;
                 result.Confidence.PhoneConfidence = 100;
                 result.Success = true;
@@ -399,12 +414,47 @@ public class DatabaseDrivenParserService : IStringParserService
                 
                 result.IsBusinessName = true;
                 result.IsResidentialName = false;
-                result.Confidence.NameConfidence = preliminaryClassification.Confidence;
+                result.Confidence.NameConfidence = 85; // Default confidence for forced business
                 result.Confidence.PhoneConfidence = 100;
                 result.Success = true;
                 
                 return result;
             }
+        }
+        
+        // Special handling for residential patterns with initials
+        if (looksLikeResidentialWithInitials && wordsForCheck.Length == 3)
+        {
+            // Treat all 3 words as the name
+            result.Name = remainingText;
+            result.Address = "";
+            result.Confidence.AddressConfidence = 0;
+            
+            // It's a residential name
+            result.IsBusinessName = false;
+            result.IsResidentialName = true;
+            result.Confidence.NameConfidence = 85; // High confidence for this specific pattern
+            
+            // Split the name properly based on the pattern
+            if (residentialInitialPattern == "initial-surname-initial")
+            {
+                // For "A Mwinkeu C", we want: LastName = "Mwinkeu", FirstName = "A C"
+                result.LastName = wordsForCheck[1]; // Middle word is the surname
+                result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[2]}"; // First and last are initials
+            }
+            else if (residentialInitialPattern == "initial-initial-surname")
+            {
+                // For "J M Smith", we want: LastName = "Smith", FirstName = "J M"
+                result.LastName = wordsForCheck[2]; // Last word is the surname
+                result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[1]}"; // First two are initials
+            }
+            
+            result.Confidence.PhoneConfidence = 100;
+            result.Success = true;
+            
+            _logger.LogInformation($"Parsed as residential with {residentialInitialPattern} pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+            
+            return result;
         }
         
         // Check if this looks like a phonebook entry (personal name format)
@@ -419,10 +469,30 @@ public class DatabaseDrivenParserService : IStringParserService
             // Classify the name
             if (!string.IsNullOrWhiteSpace(result.Name))
             {
-                var classification = await _classificationService.ClassifyAsync(result.Name);
-                result.IsBusinessName = classification.IsBusiness;
-                result.IsResidentialName = classification.IsResidential;
-                result.Confidence.NameConfidence = classification.Confidence;
+                // Use BusinessWordService to check if the name contains strong business indicators
+                var nameBusinessAnalysis = await _businessWordService.AnalyzePhraseAsync(result.Name);
+                
+                if (nameBusinessAnalysis.isBusiness && 
+                    nameBusinessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong)
+                {
+                    // Force as business
+                    result.IsBusinessName = true;
+                    result.IsResidentialName = false;
+                    result.Confidence.NameConfidence = 95; // High confidence due to strong business words
+                }
+                else
+                {
+                    var classification = await _classificationService.ClassifyAsync(result.Name);
+                    result.IsBusinessName = classification.IsBusiness;
+                    result.IsResidentialName = classification.IsResidential;
+                    result.Confidence.NameConfidence = classification.Confidence;
+                    
+                    // Split residential names into LastName and FirstName
+                    if (result.IsResidentialName)
+                    {
+                        SplitResidentialName(result);
+                    }
+                }
             }
             
             result.Confidence.PhoneConfidence = 100;
@@ -498,10 +568,36 @@ public class DatabaseDrivenParserService : IStringParserService
         // Step 3: Classify the name
         if (!string.IsNullOrWhiteSpace(result.Name))
         {
-            var classification = await _classificationService.ClassifyAsync(result.Name);
-            result.IsBusinessName = classification.IsBusiness;
-            result.IsResidentialName = classification.IsResidential;
-            result.Confidence.NameConfidence = classification.Confidence;
+            // Check for business words using database-driven service
+            var nameBusinessAnalysis = await _businessWordService.AnalyzePhraseAsync(result.Name);
+            
+            if (nameBusinessAnalysis.isBusiness)
+            {
+                // Force as business based on database analysis
+                result.IsBusinessName = true;
+                result.IsResidentialName = false;
+                result.Confidence.NameConfidence = nameBusinessAnalysis.maxStrength switch
+                {
+                    BusinessIndicatorStrength.Absolute => 99,
+                    BusinessIndicatorStrength.Strong => 95,
+                    BusinessIndicatorStrength.Medium => 85,
+                    _ => 75
+                };
+                _logger.LogDebug($"Name classified as business: {nameBusinessAnalysis.reason}");
+            }
+            else
+            {
+                var classification = await _classificationService.ClassifyAsync(result.Name);
+                result.IsBusinessName = classification.IsBusiness;
+                result.IsResidentialName = classification.IsResidential;
+                result.Confidence.NameConfidence = classification.Confidence;
+                
+                // Split residential names into LastName and FirstName
+                if (result.IsResidentialName)
+                {
+                    SplitResidentialName(result);
+                }
+            }
         }
         
         result.Confidence.PhoneConfidence = 100;
@@ -892,14 +988,8 @@ public class DatabaseDrivenParserService : IStringParserService
                 // Check if this word is in our name database
                 else if (!Regex.IsMatch(word, @"^\d+$"))
                 {
-                    // Special handling for business terminators like "Sons", "Ltd", "Inc"
-                    var businessTerminators = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
-                        "LLC", "LLP", "Sons", "Bros", "Brothers", "Co", "Company"
-                    };
-                    
-                    if (businessTerminators.Contains(wordLower))
+                    // Special handling for corporate suffixes
+                    if (await _businessWordService.IsCorporateSuffixAsync(wordLower))
                     {
                         // This is a business terminator, include it in the name
                         lastNamePartIndex = i;
@@ -1168,9 +1258,19 @@ public class DatabaseDrivenParserService : IStringParserService
         return -1;
     }
     
-    private PhoneExtractionResult ExtractPhoneNumber(string input)
+    private PhoneExtractionResult ExtractPhoneNumber(string input, string? defaultAreaCode = null)
     {
         var result = new PhoneExtractionResult();
+        
+        // Validate and normalize the default area code if provided
+        if (!string.IsNullOrWhiteSpace(defaultAreaCode))
+        {
+            defaultAreaCode = new string(defaultAreaCode.Where(char.IsDigit).ToArray());
+            if (defaultAreaCode.Length != 3)
+            {
+                defaultAreaCode = null; // Invalid area code, ignore it
+            }
+        }
         
         // Try area code pattern first, but check if it's actually a road number
         var areaCodeMatch = _areaCodePhonePattern.Match(input);
@@ -1204,7 +1304,7 @@ public class DatabaseDrivenParserService : IStringParserService
                     
                     // Extract just the phone number (second part of the match)
                     var phoneOnly = areaCodeMatch.Groups[2].Value.Trim();
-                    result.Phone = phoneOnly;
+                    result.Phone = NormalizePhoneNumber(phoneOnly, defaultAreaCode);
                     result.RemainingText = input.Substring(0, areaCodeMatch.Index).Trim() + " " + areaCodeMatch.Groups[1].Value;
                     result.Success = true;
                     return result;
@@ -1213,7 +1313,9 @@ public class DatabaseDrivenParserService : IStringParserService
                 {
                     // It's an area code
                     _logger.LogInformation($"Accepting as area code: '{areaCodeMatch.Value}'");
-                    result.Phone = areaCodeMatch.Value.Trim();
+                    var areaCode = areaCodeMatch.Groups[1].Value;
+                    var localNumber = areaCodeMatch.Groups[2].Value;
+                    result.Phone = NormalizePhoneNumber(areaCode + localNumber);
                     result.RemainingText = beforeMatch;
                     result.Success = true;
                     return result;
@@ -1222,7 +1324,9 @@ public class DatabaseDrivenParserService : IStringParserService
             else
             {
                 // No words before, accept as area code
-                result.Phone = areaCodeMatch.Value.Trim();
+                var areaCode = areaCodeMatch.Groups[1].Value;
+                var localNumber = areaCodeMatch.Groups[2].Value;
+                result.Phone = NormalizePhoneNumber(areaCode + localNumber);
                 result.RemainingText = beforeMatch;
                 result.Success = true;
                 return result;
@@ -1268,32 +1372,32 @@ public class DatabaseDrivenParserService : IStringParserService
                         if (suiteIndicators.Contains(prevWord))
                         {
                             // This is a suite/unit number, not an area code
-                            result.Phone = phone;
+                            result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
                             result.RemainingText = remaining;
                         }
                         else
                         {
                             // Likely an area code
-                            result.Phone = $"{lastWord} {phone}";
+                            result.Phone = NormalizePhoneNumber(lastWord + phone);
                             result.RemainingText = string.Join(" ", words.Take(words.Length - 1));
                         }
                     }
                     else
                     {
                         // Only one word before phone, assume it's area code
-                        result.Phone = $"{lastWord} {phone}";
+                        result.Phone = NormalizePhoneNumber(lastWord + phone);
                         result.RemainingText = string.Join(" ", words.Take(words.Length - 1));
                     }
                 }
                 else
                 {
-                    result.Phone = phone;
+                    result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
                     result.RemainingText = remaining;
                 }
             }
             else
             {
-                result.Phone = phone;
+                result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
                 result.RemainingText = remaining;
             }
             
@@ -1306,13 +1410,45 @@ public class DatabaseDrivenParserService : IStringParserService
         return result;
     }
     
-    public async Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null)
+    private string NormalizePhoneNumber(string phone, string? defaultAreaCode = null)
+    {
+        // Remove all non-digit characters
+        var digitsOnly = new string(phone.Where(char.IsDigit).ToArray());
+        
+        // If we have 10 digits, return as is
+        if (digitsOnly.Length == 10)
+        {
+            return digitsOnly;
+        }
+        
+        // If we have 7 digits and a default area code, prepend it
+        if (digitsOnly.Length == 7 && !string.IsNullOrWhiteSpace(defaultAreaCode))
+        {
+            var areaCodeDigits = new string(defaultAreaCode.Where(char.IsDigit).ToArray());
+            if (areaCodeDigits.Length == 3)
+            {
+                return areaCodeDigits + digitsOnly;
+            }
+        }
+        
+        // If we have 11 digits starting with 1 (country code), remove the 1
+        if (digitsOnly.Length == 11 && digitsOnly[0] == '1')
+        {
+            return digitsOnly.Substring(1);
+        }
+        
+        // Return what we have - it might not be a valid 10-digit number
+        // but we'll preserve it and let the caller handle validation
+        return digitsOnly;
+    }
+    
+    public async Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null, string? areaCode = null)
     {
         var result = new BatchParseResult();
         
         foreach (var input in inputs)
         {
-            var parseResult = await ParseAsync(input, province);
+            var parseResult = await ParseAsync(input, province, areaCode);
             result.Results.Add(parseResult);
             
             if (parseResult.Success)
@@ -1323,6 +1459,73 @@ public class DatabaseDrivenParserService : IStringParserService
         
         result.TotalProcessed = inputs.Count;
         return result;
+    }
+    
+    private void SplitResidentialName(ParseResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.Name))
+            return;
+            
+        var name = result.Name.Trim();
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        
+        if (parts.Length == 0)
+            return;
+            
+        if (parts.Length == 1)
+        {
+            result.LastName = parts[0];
+            result.FirstName = null;
+            return;
+        }
+        
+        var firstPart = parts[0];
+        var remainingParts = string.Join(" ", parts.Skip(1));
+        
+        // Check if first part is initial(s) and remaining is a regular name
+        // Example: "M Allain" -> LastName: Allain, FirstName: M
+        if (IsInitialOrMultipleInitials(firstPart) && !IsInitialOrMultipleInitials(remainingParts))
+        {
+            result.LastName = remainingParts;
+            result.FirstName = firstPart;
+        }
+        else
+        {
+            // Standard format: "Smith John & Mary" -> LastName: Smith, FirstName: John & Mary
+            result.LastName = firstPart;
+            result.FirstName = FormatFirstName(remainingParts);
+        }
+    }
+    
+    private bool IsInitialOrMultipleInitials(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+            
+        text = text.Trim().Replace(".", "");
+        
+        // Single or double initial (e.g., "M", "AB")
+        if (text.Length <= 2 && text.All(char.IsUpper))
+            return true;
+            
+        // Multiple initials separated by spaces or &
+        var parts = text.Split(new[] { ' ', '&' }, StringSplitOptions.RemoveEmptyEntries);
+        
+        return parts.All(part => 
+            part.Replace(".", "").Length <= 2 && 
+            part.Replace(".", "").All(char.IsUpper)
+        );
+    }
+    
+    private string FormatFirstName(string firstName)
+    {
+        if (string.IsNullOrWhiteSpace(firstName))
+            return string.Empty;
+            
+        // Ensure proper spacing around ampersands
+        firstName = Regex.Replace(firstName.Trim(), @"\s*&\s*", " & ");
+        
+        return firstName;
     }
     
     private class PhoneExtractionResult

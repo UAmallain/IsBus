@@ -1,0 +1,50 @@
+[
+  {
+    "input": "A Mwinkeu C 382-5225",
+    "province": "NB",
+    "areaCode": "506",
+    "expectedName": "A Mwinkeu C",
+    "expectedLastName": "Mwinkeu",
+    "expectedFirstName": "A C",
+    "expectedAddress": "",
+    "expectedPhone": "5063825225",
+    "expectedIsResidential": true,
+    "description": "Initial Surname Initial pattern"
+  },
+  {
+    "input": "J M Smith 123 Main St 555-1234",
+    "province": "NS", 
+    "areaCode": "902",
+    "expectedName": "J M Smith",
+    "expectedLastName": "Smith",
+    "expectedFirstName": "J M",
+    "expectedAddress": "123 Main St",
+    "expectedPhone": "9025551234",
+    "expectedIsResidential": true,
+    "description": "Initial Initial Surname with address"
+  },
+  {
+    "input": "B Johnson D 456-7890",
+    "province": "NB",
+    "areaCode": "506",
+    "expectedName": "B Johnson D",
+    "expectedLastName": "Johnson",
+    "expectedFirstName": "B D",
+    "expectedAddress": "",
+    "expectedPhone": "5064567890",
+    "expectedIsResidential": true,
+    "description": "Initial Surname Initial without address"
+  },
+  {
+    "input": "M A Wilson 789 Oak Ave 333-4444",
+    "province": "NS",
+    "areaCode": "902",
+    "expectedName": "M A Wilson",
+    "expectedLastName": "Wilson",
+    "expectedFirstName": "M A",
+    "expectedAddress": "789 Oak Ave",
+    "expectedPhone": "9023334444",
+    "expectedIsResidential": true,
+    "description": "Initial Initial Surname with full address"
+  }
+]

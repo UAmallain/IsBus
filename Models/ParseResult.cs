@@ -6,6 +6,8 @@ public class ParseResult
     public string? ErrorMessage { get; set; }
     public string Input { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? LastName { get; set; }
+    public string? FirstName { get; set; }
     public string Address { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public bool IsBusinessName { get; set; }
@@ -25,12 +27,14 @@ public class ParseRequest
 {
     public string Input { get; set; } = string.Empty;
     public string? Province { get; set; } // Optional: NS, NB, PE, NL, etc.
+    public string? AreaCode { get; set; } // Optional: 3-digit area code (e.g., "902", "506")
 }
 
 public class BatchParseRequest
 {
     public List<string> Inputs { get; set; } = new();
     public string? Province { get; set; } // Optional: applies to all inputs in batch
+    public string? AreaCode { get; set; } // Optional: applies to all inputs in batch
 }
 
 public class BatchParseResult

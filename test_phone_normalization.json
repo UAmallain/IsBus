@@ -1,0 +1,44 @@
+[
+  {
+    "input": "John Smith 123 Main St 555-1234",
+    "areaCode": "902",
+    "expectedPhone": "9025551234",
+    "description": "7-digit phone with area code parameter"
+  },
+  {
+    "input": "ABC Company 456 Oak Ave 902 555-5678",
+    "areaCode": null,
+    "expectedPhone": "9025555678",
+    "description": "10-digit phone with area code in input"
+  },
+  {
+    "input": "Mary Johnson 789 Pine Rd 555-9012",
+    "areaCode": "506",
+    "expectedPhone": "5065559012",
+    "description": "7-digit phone with different area code"
+  },
+  {
+    "input": "XYZ Corp 321 Elm St 1-902-555-3456",
+    "areaCode": null,
+    "expectedPhone": "9025553456",
+    "description": "11-digit phone with country code"
+  },
+  {
+    "input": "Bob Wilson 654 Maple Dr 902-555-7890",
+    "areaCode": null,
+    "expectedPhone": "9025557890",
+    "description": "10-digit phone with dashes"
+  },
+  {
+    "input": "Jane Doe 987 Cedar Ln (902) 555-2468",
+    "areaCode": null,
+    "expectedPhone": "9025552468",
+    "description": "10-digit phone with parentheses"
+  },
+  {
+    "input": "M Allain 54 Petersfield St 388-6232",
+    "areaCode": "902",
+    "expectedPhone": "9023886232",
+    "description": "Example with initial swapped name and 7-digit phone"
+  }
+]

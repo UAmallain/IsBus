@@ -20,6 +20,20 @@ public class ParserController : ControllerBase
     }
     
     /// <summary>
+    /// Debug endpoint for Abraham Kaine case
+    /// </summary>
+    [HttpGet("debug/abraham")]
+    public async Task<IActionResult> DebugAbraham()
+    {
+        var result = await _parserService.ParseAsync("Abraham Kaine 17 Kingsmere 388-3515");
+        return Ok(new
+        {
+            ParseResult = result,
+            Message = "Check logs for detailed analysis"
+        });
+    }
+    
+    /// <summary>
     /// Parse a string into name, address, and phone number components
     /// </summary>
     [HttpPost("parse")]
@@ -36,7 +50,7 @@ public class ParserController : ControllerBase
         
         try
         {
-            var result = await _parserService.ParseAsync(request.Input, request.Province);
+            var result = await _parserService.ParseAsync(request.Input, request.Province, request.AreaCode);
             
             if (!result.Success)
             {
@@ -90,7 +104,7 @@ public class ParserController : ControllerBase
         
         try
         {
-            var result = await _parserService.ParseBatchAsync(request.Inputs, request.Province);
+            var result = await _parserService.ParseBatchAsync(request.Inputs, request.Province, request.AreaCode);
             return Ok(result);
         }
         catch (Exception ex)
@@ -108,7 +122,7 @@ public class ParserController : ControllerBase
     /// Parse a string from query parameter (GET method)
     /// </summary>
     [HttpGet("parse")]
-    public async Task<IActionResult> ParseGet([FromQuery] string input, [FromQuery] string? province = null)
+    public async Task<IActionResult> ParseGet([FromQuery] string input, [FromQuery] string? province = null, [FromQuery] string? areaCode = null)
     {
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -121,7 +135,7 @@ public class ParserController : ControllerBase
         
         try
         {
-            var result = await _parserService.ParseAsync(input, province);
+            var result = await _parserService.ParseAsync(input, province, areaCode);
             
             if (!result.Success)
             {

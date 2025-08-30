@@ -5,8 +5,8 @@ namespace IsBus.Services;
 
 public interface IStringParserService
 {
-    Task<ParseResult> ParseAsync(string input, string? province = null);
-    Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null);
+    Task<ParseResult> ParseAsync(string input, string? province = null, string? areaCode = null);
+    Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null, string? areaCode = null);
 }
 
 public class StringParserService : IStringParserService
@@ -70,7 +70,7 @@ public class StringParserService : IStringParserService
         _logger = logger;
     }
     
-    public async Task<ParseResult> ParseAsync(string input, string? province = null)
+    public async Task<ParseResult> ParseAsync(string input, string? province = null, string? areaCode = null)
     {
         var result = new ParseResult { Input = input };
         
@@ -488,13 +488,13 @@ public class StringParserService : IStringParserService
         return businessWords.Contains(word.ToLower());
     }
     
-    public async Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null)
+    public async Task<BatchParseResult> ParseBatchAsync(List<string> inputs, string? province = null, string? areaCode = null)
     {
         var result = new BatchParseResult();
         
         foreach (var input in inputs)
         {
-            var parseResult = await ParseAsync(input, province);
+            var parseResult = await ParseAsync(input, province, areaCode);
             result.Results.Add(parseResult);
             
             if (parseResult.Success)
