@@ -88,7 +88,52 @@ public class ClassificationService : IClassificationService
         
         // 2. Check for valid residential pattern FIRST
         var isValidResidential = await IsValidResidentialPattern(words);
-        scores["valid_residential_pattern"] = isValidResidential ? 40 : -30; // Penalty if not valid pattern
+        
+        // Check if this is an initial pattern (A Name or Name A)
+        // Extract just the name portion (before address starts) - same logic as in IsValidResidentialPattern
+        int nameEndIndex = words.Length;
+        for (int i = 0; i < words.Length; i++)
+        {
+            if (Regex.IsMatch(words[i], @"^\d+"))
+            {
+                nameEndIndex = i;
+                break;
+            }
+            var lowerWord = words[i].ToLower();
+            if (i > 0 && (lowerWord == "st" || lowerWord == "street" || lowerWord == "ave" || 
+                         lowerWord == "avenue" || lowerWord == "rd" || lowerWord == "road" || 
+                         lowerWord == "dr" || lowerWord == "drive" || lowerWord == "blvd"))
+            {
+                nameEndIndex = i - 1;
+                break;
+            }
+        }
+        
+        var nameWords = words.Take(Math.Min(nameEndIndex, 4)).ToArray();
+        bool isInitialPattern = false;
+        if (nameWords.Length >= 2)
+        {
+            var firstIsInitial = Regex.IsMatch(nameWords[0], @"^[a-z]\.?$", RegexOptions.IgnoreCase);
+            var lastIsInitial = Regex.IsMatch(nameWords[nameWords.Length - 1], @"^[a-z]\.?$", RegexOptions.IgnoreCase);
+            isInitialPattern = firstIsInitial || lastIsInitial;
+        }
+        
+        // Give MUCH stronger weight to valid residential patterns with initials
+        if (isValidResidential && isInitialPattern)
+        {
+            scores["valid_residential_pattern"] = 80; // Very strong residential indicator
+            scores["initial_name_pattern"] = 50; // Additional boost for initial patterns
+        }
+        else if (isValidResidential)
+        {
+            scores["valid_residential_pattern"] = 40;
+            scores["initial_name_pattern"] = 0;
+        }
+        else
+        {
+            scores["valid_residential_pattern"] = -30; // Penalty if not valid pattern
+            scores["initial_name_pattern"] = 0;
+        }
         
         // 3. Check for residential patterns
         var residentialPatternScore = CheckResidentialPatterns(normalizedInput);
@@ -153,6 +198,7 @@ public class ClassificationService : IClassificationService
                              scores["first_word_lastname"] + 
                              scores["possessive_simple"] +
                              scores["name_score"] +
+                             scores.GetValueOrDefault("initial_name_pattern", 0) +
                              (scores["valid_residential_pattern"] > 0 ? scores["valid_residential_pattern"] : 0);
         
         // Normalize scores to 0-100

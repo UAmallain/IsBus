@@ -98,9 +98,30 @@ public class DatabaseDrivenParserService : IStringParserService
         bool looksLikeResidentialWithInitials = false;
         string residentialInitialPattern = "";
         
-        // Only check for initial patterns if we're looking at exactly 3 words
+        // Check for initial patterns with 2 or 3 words
         // This preliminary check can be overridden by strong business indicators
-        if (wordsForCheck.Length == 3)
+        if (wordsForCheck.Length == 2)
+        {
+            // Check for "Initial Name" or "Name Initial" patterns
+            bool firstIsInitial = wordsForCheck[0].Length <= 2 && wordsForCheck[0].All(c => char.IsLetter(c) || c == '.');
+            bool lastIsInitial = wordsForCheck[1].Length <= 2 && wordsForCheck[1].All(c => char.IsLetter(c) || c == '.');
+            bool firstIsName = wordsForCheck[0].Length > 2 && char.IsLetter(wordsForCheck[0][0]);
+            bool lastIsName = wordsForCheck[1].Length > 2 && char.IsLetter(wordsForCheck[1][0]);
+            
+            if (firstIsInitial && lastIsName)
+            {
+                looksLikeResidentialWithInitials = true;
+                residentialInitialPattern = "initial-name";
+                _logger.LogDebug($"Detected POTENTIAL residential pattern 'initial name': {remainingText}");
+            }
+            else if (firstIsName && lastIsInitial)
+            {
+                looksLikeResidentialWithInitials = true;
+                residentialInitialPattern = "name-initial";
+                _logger.LogDebug($"Detected POTENTIAL residential pattern 'name initial': {remainingText}");
+            }
+        }
+        else if (wordsForCheck.Length == 3)
         {
             // Check if first and last are single letters (initials)
             bool firstIsInitial = wordsForCheck[0].Length <= 2 && wordsForCheck[0].All(c => char.IsLetter(c) || c == '.');
@@ -110,6 +131,9 @@ public class DatabaseDrivenParserService : IStringParserService
             // Also check for "Initial Initial Surname" pattern
             bool secondIsInitial = wordsForCheck[1].Length <= 2 && wordsForCheck[1].All(c => char.IsLetter(c) || c == '.');
             bool lastIsName = wordsForCheck[2].Length > 2 && char.IsLetter(wordsForCheck[2][0]);
+            
+            // Also check for "Name Initial Initial" pattern (like "Abdelhai H B")
+            bool firstIsName = wordsForCheck[0].Length > 2 && char.IsLetter(wordsForCheck[0][0]);
             
             if (firstIsInitial && lastIsInitial && middleIsName)
             {
@@ -122,6 +146,12 @@ public class DatabaseDrivenParserService : IStringParserService
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "initial-initial-surname";
                 _logger.LogDebug($"Detected POTENTIAL residential pattern 'initial initial surname': {remainingText}");
+            }
+            else if (firstIsName && secondIsInitial && lastIsInitial)
+            {
+                looksLikeResidentialWithInitials = true;
+                residentialInitialPattern = "name-initial-initial";
+                _logger.LogDebug($"Detected POTENTIAL residential pattern 'name initial initial': {remainingText}");
             }
         }
         
@@ -165,16 +195,18 @@ public class DatabaseDrivenParserService : IStringParserService
         }
         
         // "A 1" or "A-1" patterns are always businesses (but not if it's a residential pattern)
-        // Also handle variations like "A1", "A #1", etc.
+        // Also handle variations like "A1", "A #1", "A - 1", etc.
         if (!forceAsBusiness && !looksLikeResidentialWithInitials && 
             wordsForCheck.Length >= 2 && 
             wordsForCheck[0].Equals("A", StringComparison.OrdinalIgnoreCase))
         {
             // Check if second word is "1" or contains "1"
+            // Also handle "A - 1" pattern where hyphen is a separate word
             if (wordsForCheck[1] == "1" || 
                 wordsForCheck[1] == "#1" || 
                 wordsForCheck[1] == "-1" ||
-                wordsForCheck[1].StartsWith("1"))
+                wordsForCheck[1].StartsWith("1") ||
+                (wordsForCheck[1] == "-" && wordsForCheck.Length > 2 && wordsForCheck[2] == "1"))
             {
                 forceAsBusiness = true;
                 isLikelyBusiness = true; // Force as business
@@ -220,13 +252,20 @@ public class DatabaseDrivenParserService : IStringParserService
                 {
                     _logger.LogInformation($"Found number '{word}' at position {i}");
                     
-                    // Special case: "A 1" pattern at the beginning - this is part of business name
+                    // Special case: "A 1" or "A - 1" pattern at the beginning - this is part of business name
                     // Check if this is position 1 and previous word is "A"
                     if (i == 1 && word == "1" && words[0].Equals("A", StringComparison.OrdinalIgnoreCase))
                     {
                         _logger.LogInformation($"Skipping number '1' at position 1 because it follows 'A' (A 1 pattern)");
                         // This is "A 1" pattern - skip looking for address at this number
                         // But we need to find the REAL address number later
+                        continue;
+                    }
+                    // Also check for "A - 1" pattern
+                    if (i == 2 && word == "1" && words[0].Equals("A", StringComparison.OrdinalIgnoreCase) && words[1] == "-")
+                    {
+                        _logger.LogInformation($"Skipping number '1' at position 2 because it follows 'A -' (A - 1 pattern)");
+                        // This is "A - 1" pattern - skip looking for address at this number
                         continue;
                     }
                     
