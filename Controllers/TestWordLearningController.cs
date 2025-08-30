@@ -34,7 +34,13 @@ public class TestWordLearningController : ControllerBase
             LastName = "Abraham",
             Name = "Abraham Kaine",
             Phone = "5555555",
-            Address = "123 Test St"
+            Address = "123 Test St",
+            Confidence = new ParseConfidence
+            {
+                NameConfidence = 95,  // High confidence for testing
+                AddressConfidence = 90,
+                PhoneConfidence = 100
+            }
         };
         
         _logger.LogInformation("Starting test word learning");

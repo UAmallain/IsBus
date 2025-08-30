@@ -37,15 +37,30 @@ public class WordLearningService : IWordLearningService
         _logger = logger;
     }
     
-    public async Task<int> LearnFromParseResultAsync(ParseResult parseResult)
+    public async Task<int> LearnFromParseResultAsync(ParseResult parseResult, int minimumConfidence = 85)
     {
         if (parseResult == null || !parseResult.Success)
         {
             _logger.LogDebug($"Skipping learning - parse result null or unsuccessful");
             return 0;
         }
+        
+        // Check confidence threshold
+        var nameConfidence = parseResult.Confidence?.NameConfidence ?? 0;
+        if (nameConfidence < minimumConfidence)
+        {
+            _logger.LogInformation($"Skipping learning - confidence {nameConfidence}% is below threshold {minimumConfidence}% for: {parseResult.Input}");
+            return 0;
+        }
+        
+        // Additional safety check: Don't learn if classification is uncertain
+        if (!parseResult.IsBusinessName && !parseResult.IsResidentialName)
+        {
+            _logger.LogInformation($"Skipping learning - unclear classification (neither business nor residential) for: {parseResult.Input}");
+            return 0;
+        }
             
-        _logger.LogInformation($"Learning from parse result: Input='{parseResult.Input}', IsRes={parseResult.IsResidentialName}, IsBus={parseResult.IsBusinessName}, FirstName='{parseResult.FirstName}', LastName='{parseResult.LastName}'");
+        _logger.LogInformation($"Learning from parse result (confidence: {nameConfidence}%): Input='{parseResult.Input}', IsRes={parseResult.IsResidentialName}, IsBus={parseResult.IsBusinessName}, FirstName='{parseResult.FirstName}', LastName='{parseResult.LastName}'");
             
         int updatedCount = 0;
         

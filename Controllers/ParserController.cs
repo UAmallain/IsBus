@@ -56,9 +56,18 @@ public class ParserController : ControllerBase
             {
                 try
                 {
-                    _logger.LogInformation($"Learning enabled - attempting to learn from parse result for: {request.Input}");
-                    var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(result);
-                    _logger.LogInformation($"Word learning service returned {wordsLearned} words learned from: {request.Input}");
+                    var minimumConfidence = _configuration.GetValue<int>("WordLearning:MinimumConfidenceThreshold", 85);
+                    _logger.LogInformation($"Learning enabled - attempting to learn from parse result (min confidence: {minimumConfidence}%) for: {request.Input}");
+                    var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(result, minimumConfidence);
+                    
+                    if (wordsLearned > 0)
+                    {
+                        _logger.LogInformation($"Successfully learned {wordsLearned} words from: {request.Input}");
+                    }
+                    else
+                    {
+                        _logger.LogDebug($"No words learned from: {request.Input} (likely due to low confidence or unclear classification)");
+                    }
                 }
                 catch (Exception learnEx)
                 {
@@ -127,16 +136,32 @@ public class ParserController : ControllerBase
             {
                 try
                 {
+                    var minimumConfidence = _configuration.GetValue<int>("WordLearning:MinimumConfidenceThreshold", 85);
                     int totalWordsLearned = 0;
+                    int recordsLearned = 0;
+                    int recordsSkipped = 0;
+                    
                     foreach (var parseResult in result.Results.Where(r => r.Success))
                     {
-                        var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(parseResult);
-                        totalWordsLearned += wordsLearned;
+                        var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(parseResult, minimumConfidence);
+                        if (wordsLearned > 0)
+                        {
+                            totalWordsLearned += wordsLearned;
+                            recordsLearned++;
+                        }
+                        else
+                        {
+                            recordsSkipped++;
+                        }
                     }
                     
                     if (totalWordsLearned > 0)
                     {
-                        _logger.LogInformation($"Learned {totalWordsLearned} words from batch of {result.SuccessCount} successful parses");
+                        _logger.LogInformation($"Batch learning complete: {totalWordsLearned} words learned from {recordsLearned} high-confidence records, {recordsSkipped} low-confidence records skipped");
+                    }
+                    else
+                    {
+                        _logger.LogInformation($"Batch learning complete: No words learned from {result.SuccessCount} records (all below {minimumConfidence}% confidence threshold)");
                     }
                 }
                 catch (Exception learnEx)
@@ -194,9 +219,18 @@ public class ParserController : ControllerBase
             {
                 try
                 {
-                    _logger.LogInformation($"[GET] Learning enabled - attempting to learn from parse result for: {input}");
-                    var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(result);
-                    _logger.LogInformation($"[GET] Word learning service returned {wordsLearned} words learned from: {input}");
+                    var minimumConfidence = _configuration.GetValue<int>("WordLearning:MinimumConfidenceThreshold", 85);
+                    _logger.LogInformation($"[GET] Learning enabled - attempting to learn from parse result (min confidence: {minimumConfidence}%) for: {input}");
+                    var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(result, minimumConfidence);
+                    
+                    if (wordsLearned > 0)
+                    {
+                        _logger.LogInformation($"[GET] Successfully learned {wordsLearned} words from: {input}");
+                    }
+                    else
+                    {
+                        _logger.LogDebug($"[GET] No words learned from: {input} (likely due to low confidence or unclear classification)");
+                    }
                 }
                 catch (Exception learnEx)
                 {

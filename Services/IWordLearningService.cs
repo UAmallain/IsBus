@@ -13,8 +13,9 @@ public interface IWordLearningService
     /// Updates word counts in the database based on a successfully parsed result
     /// </summary>
     /// <param name="parseResult">The parsed result containing classification information</param>
+    /// <param name="minimumConfidence">Minimum confidence threshold for learning (0-100)</param>
     /// <returns>Number of words updated</returns>
-    Task<int> LearnFromParseResultAsync(ParseResult parseResult);
+    Task<int> LearnFromParseResultAsync(ParseResult parseResult, int minimumConfidence = 85);
     
     /// <summary>
     /// Updates or inserts a word with the specified type and increments its count
