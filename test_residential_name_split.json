@@ -1,37 +1,52 @@
 [
   {
-    "input": "M Allain 54 Petersfield St 388-6232",
-    "expectedLastName": "Allain",
-    "expectedFirstName": "M",
-    "expectedAddress": "54 Petersfield St",
-    "expectedPhone": "388-6232"
+    "input": "A Dizon 38 Rachel St 351-3045",
+    "expectedResidential": true,
+    "description": "dizon = last: 98, first: 36, business: 1 | max type=last(98)"
   },
   {
-    "input": "Smith John & Mary 123 Main St 555-1234",
-    "expectedLastName": "Smith",
-    "expectedFirstName": "John & Mary",
-    "expectedAddress": "123 Main St",
-    "expectedPhone": "555-1234"
+    "input": "A Kevin 25 Anne St 830-5522",
+    "expectedResidential": true,
+    "description": "Kevin = first: 464, last: 20, both: 7226, business: 481 | max type=both(7226)"
   },
   {
-    "input": "Johnson A B 456 Oak Ave 555-5678",
-    "expectedLastName": "Johnson",
-    "expectedFirstName": "A B",
-    "expectedAddress": "456 Oak Ave",
-    "expectedPhone": "555-5678"
+    "input": "A Leblanc 454 Route 933 Beaubassin East 532-3602",
+    "expectedResidential": true,
+    "description": "Leblanc = first: 20, last: 196, both: 17060, business: 204 | max type=both(17060)"
   },
   {
-    "input": "R Johnson 789 Pine Rd 555-9012",
-    "expectedLastName": "Johnson",
-    "expectedFirstName": "R",
-    "expectedAddress": "789 Pine Rd",
-    "expectedPhone": "555-9012"
+    "input": "A Noel 148 Houlahan St Dieppe 830-0985",
+    "expectedResidential": true,
+    "description": "Noel = first: 68, last: 42, both: 672, business: 89 | max type=both(672)"
   },
   {
-    "input": "Williams Robert & Susan 321 Elm St 555-3456",
-    "expectedLastName": "Williams",
-    "expectedFirstName": "Robert & Susan",
-    "expectedAddress": "321 Elm St",
-    "expectedPhone": "555-3456"
+    "input": "Abbass A 26 Fairway Blvd Riverview 386-1708",
+    "expectedResidential": true,
+    "description": "Abbass = last: 164, business: 11 | max type=last(164)"
+  },
+  {
+    "input": "Abbass S 43 Woodleigh St 384-4803",
+    "expectedResidential": true,
+    "description": "Abbass = last: 164, business: 11 | max type=last(164)"
+  },
+  {
+    "input": "Abdelhadi Z 152 Holland Dr 830-2167",
+    "expectedResidential": true,
+    "description": "Abdelhadi = last: 12 | max type=last(12)"
+  },
+  {
+    "input": "Abdelhai H B 14 Ruth St 830-5066",
+    "expectedResidential": true,
+    "description": "Abdelhai = last: 8 | max type=last(8)"
+  },
+  {
+    "input": "Abdoulaye M 2115 Amirault St Dieppe 204-9407",
+    "expectedResidential": true,
+    "description": "Abdoulaye = first: 10, last:4, both: 26 | max type=both(26)"
+  },
+  {
+    "input": "Aberathna B 150 Wynwood Dr 830-7163",
+    "expectedResidential": true,
+    "description": "Aberathna = last: 10 | max type=last(10)"
   }
 ]

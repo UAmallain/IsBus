@@ -233,23 +233,128 @@ public class ClassificationService : IClassificationService
         return Math.Min(score, 60); // Cap at 60
     }
     
-    private async Task<bool> IsValidResidentialPattern(string[] words)
+    private async Task<bool> IsValidResidentialPattern(string[] allWords)
     {
-        // Residential MUST have at least 2 components (first + last)
-        if (words.Length < 2)
+        // Extract just the name portion (before address starts)
+        // Look for address indicators: numbers, street types, known communities
+        int nameEndIndex = allWords.Length; // Default to all words
+        
+        for (int i = 0; i < allWords.Length; i++)
+        {
+            // Check if this word starts an address (number or known street suffix)
+            if (Regex.IsMatch(allWords[i], @"^\d+"))
+            {
+                nameEndIndex = i;
+                break;
+            }
+            
+            // Check for street types (st, street, ave, avenue, rd, road, etc.)
+            var lowerWord = allWords[i].ToLower();
+            if (i > 0 && (lowerWord == "st" || lowerWord == "street" || lowerWord == "ave" || 
+                         lowerWord == "avenue" || lowerWord == "rd" || lowerWord == "road" || 
+                         lowerWord == "dr" || lowerWord == "drive" || lowerWord == "blvd" || 
+                         lowerWord == "boulevard" || lowerWord == "route" || lowerWord == "hwy" ||
+                         lowerWord == "highway" || lowerWord == "lane" || lowerWord == "ln" ||
+                         lowerWord == "court" || lowerWord == "ct" || lowerWord == "place" ||
+                         lowerWord == "pl" || lowerWord == "circle" || lowerWord == "cir"))
+            {
+                nameEndIndex = i - 1; // The word before the street type
+                break;
+            }
+        }
+        
+        // Extract just the name words
+        var words = allWords.Take(Math.Min(nameEndIndex, 4)).ToArray(); // Max 4 words for a name
+        
+        // Residential MUST have at least 1 word that could be a name
+        if (words.Length < 1)
             return false;
         
-        // Check for patterns like:
-        // - "John Smith" (first last)
-        // - "Smith John" (last first - also valid!)
-        // - "J Smith" (initial last)
-        // - "J. Smith" (initial with period last)
-        // - "John & Mary Smith" (multiple first names)
-        // - "J & M Smith" (multiple initials)
-        // - "John and Mary Smith"
+        // Single letter followed by name is valid (e.g., "A Dizon", "S Abbass")
+        if (words.Length >= 2)
+        {
+            // Check if first word is an initial
+            var hasInitialFirst = Regex.IsMatch(words[0], @"^[a-z]\.?$", RegexOptions.IgnoreCase);
+            if (hasInitialFirst && words.Length >= 2)
+            {
+                // Check if second word is a name
+                var secondWordLower = words[1].ToLower();
+                var secondWordData = await _context.WordData
+                    .Where(w => w.WordLower == secondWordLower && 
+                               (w.WordType == "first" || w.WordType == "last" || w.WordType == "both"))
+                    .ToListAsync();
+                
+                if (secondWordData.Any())
+                {
+                    _logger.LogDebug($"Pattern 'Initial Name': {words[0]} {words[1]} (found in word_data)");
+                    return true;
+                }
+                
+                // Also check Names table
+                var secondWordNames = await _context.Names
+                    .Where(n => n.NameLower == secondWordLower)
+                    .ToListAsync();
+                    
+                if (secondWordNames.Any())
+                {
+                    _logger.LogDebug($"Pattern 'Initial Name': {words[0]} {words[1]} (found in names)");
+                    return true;
+                }
+            }
+            
+            // Check if last word is an initial (e.g., "Abbass S")
+            var hasInitialLast = Regex.IsMatch(words[words.Length - 1], @"^[a-z]\.?$", RegexOptions.IgnoreCase);
+            if (hasInitialLast && words.Length >= 2)
+            {
+                // Check if first word is a name
+                var firstWordLower = words[0].ToLower();
+                var firstWordData = await _context.WordData
+                    .Where(w => w.WordLower == firstWordLower && 
+                               (w.WordType == "first" || w.WordType == "last" || w.WordType == "both"))
+                    .ToListAsync();
+                
+                if (firstWordData.Any())
+                {
+                    _logger.LogDebug($"Pattern 'Name Initial': {words[0]} {words[words.Length - 1]} (found in word_data)");
+                    return true;
+                }
+                
+                // Also check Names table
+                var firstWordNames = await _context.Names
+                    .Where(n => n.NameLower == firstWordLower)
+                    .ToListAsync();
+                    
+                if (firstWordNames.Any())
+                {
+                    _logger.LogDebug($"Pattern 'Name Initial': {words[0]} {words[words.Length - 1]} (found in names)");
+                    return true;
+                }
+            }
+            
+            // Check for middle initial patterns (e.g., "Abdelhai H B")
+            if (words.Length == 3)
+            {
+                var hasMiddleInitial = Regex.IsMatch(words[1], @"^[a-z]\.?$", RegexOptions.IgnoreCase);
+                var hasLastInitial = Regex.IsMatch(words[2], @"^[a-z]\.?$", RegexOptions.IgnoreCase);
+                
+                if (hasMiddleInitial || hasLastInitial)
+                {
+                    // Check if first word is a name
+                    var firstWordLower = words[0].ToLower();
+                    var firstWordData = await _context.WordData
+                        .Where(w => w.WordLower == firstWordLower && 
+                                   (w.WordType == "first" || w.WordType == "last" || w.WordType == "both"))
+                        .ToListAsync();
+                    
+                    if (firstWordData.Any())
+                    {
+                        _logger.LogDebug($"Pattern 'Name with initials': {string.Join(" ", words)} (found in word_data)");
+                        return true;
+                    }
+                }
+            }
+        }
         
-        // Check if it matches initial patterns
-        var hasInitial = Regex.IsMatch(words[0], @"^[a-z]\.?$", RegexOptions.IgnoreCase);
         
         // Check for ampersand/and patterns
         var hasMultipleNames = words.Any(w => w == "&" || w.ToLower() == "and");
@@ -270,9 +375,10 @@ public class ClassificationService : IClassificationService
             }
         }
         
-        // Standard pattern: first/initial + last OR last + first
+        // Standard two-word pattern: first + last OR last + first
         if (words.Length == 2)
         {
+            
             // Get ALL name records for each word (could be multiple types)
             var word0Names = await _context.Names
                 .Where(n => n.NameLower == words[0].ToLower())
@@ -335,13 +441,7 @@ public class ClassificationService : IClassificationService
                 return pattern1Valid || pattern2Valid;
             }
             
-            // Check for initial + name pattern
-            if (hasInitial && word1Names.Any() && word1Names.Any(n => n.NameType == "last" || n.NameType == "both"))
-            {
-                return true;
-            }
-            
-            _logger.LogDebug("Not a valid residential pattern");
+            _logger.LogDebug("Not a valid residential pattern for 2 words");
             return false;
         }
         

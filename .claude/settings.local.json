@@ -60,7 +60,10 @@
       "Bash('C:\\Program Files\\MariaDB 11.7\\bin\\mysql.exe':*)",
       "Bash(\"/mnt/c/Program Files/MariaDB 11.7/bin/mysql.exe\" -u root -pYourStrong!Passw0rd bor_db -e \"SELECT word_lower, word_type, word_count FROM word_data WHERE word_lower IN (''inc'', ''abraham'', ''kaine'') ORDER BY word_lower, word_type;\")",
       "Bash(\"/mnt/c/Program Files/MariaDB 11.7/bin/mysql.exe\" -h 127.0.0.1 -u root -pYourStrong!Passw0rd bor_db -e \"SELECT word_lower, word_type, word_count FROM word_data WHERE word_lower IN (''inc'', ''abraham'', ''kaine'') ORDER BY word_lower, word_type;\")",
-      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 33600)"
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 33600)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 46824)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run test_initial_patterns.cs)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run)"
     ],
     "deny": [],
     "ask": []
