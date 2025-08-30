@@ -52,7 +52,14 @@
       "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 15948)",
       "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://0.0.0.0:5086\")",
       "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run --urls \"http://0.0.0.0:5086\" --no-build)",
-      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run test_abraham_debug.cs)"
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run test_abraham_debug.cs)",
+      "Bash(\"/mnt/c/Windows/System32/taskkill.exe\" /f /pid 13596)",
+      "Bash(sqlcmd:*)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run AddCorporateSuffixes.cs)",
+      "Bash(\"/mnt/c/Program Files/dotnet/dotnet.exe\" run TestMigration.cs)",
+      "Bash('C:\\Program Files\\MariaDB 11.7\\bin\\mysql.exe':*)",
+      "Bash(\"/mnt/c/Program Files/MariaDB 11.7/bin/mysql.exe\" -u root -pYourStrong!Passw0rd bor_db -e \"SELECT word_lower, word_type, word_count FROM word_data WHERE word_lower IN (''inc'', ''abraham'', ''kaine'') ORDER BY word_lower, word_type;\")",
+      "Bash(\"/mnt/c/Program Files/MariaDB 11.7/bin/mysql.exe\" -h 127.0.0.1 -u root -pYourStrong!Passw0rd bor_db -e \"SELECT word_lower, word_type, word_count FROM word_data WHERE word_lower IN (''inc'', ''abraham'', ''kaine'') ORDER BY word_lower, word_type;\")"
     ],
     "deny": [],
     "ask": []

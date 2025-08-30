@@ -1,0 +1,28 @@
+[
+  {
+    "input": "A P Reid Insurance Stores Inc Moncton 123-4567",
+    "expectedIsBusinessName": true,
+    "description": "Corporate suffix 'Inc' should force business classification"
+  },
+  {
+    "input": "A W Leil Cranes & Equipment Ltd 123-4567",
+    "expectedIsBusinessName": true,
+    "description": "Contains 'Equipment' (high business count) and 'Ltd' suffix"
+  },
+  {
+    "input": "Abraham Kaine 17 Kingsmere 388-3515",
+    "expectedIsBusinessName": false,
+    "expectedIsResidentialName": true,
+    "description": "Name counts higher than business counts"
+  },
+  {
+    "input": "Johnson & Associates LLC 555-1234",
+    "expectedIsBusinessName": true,
+    "description": "Contains 'Associates' and 'LLC' suffix"
+  },
+  {
+    "input": "Mary Smith Consulting Services 555-0000",
+    "expectedIsBusinessName": true,
+    "description": "Contains 'Consulting' and 'Services' business words"
+  }
+]

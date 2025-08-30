@@ -9,20 +9,16 @@ public class ContextClassificationService : IClassificationService
 {
     private readonly PhonebookContext _context;
     private readonly ILogger<ContextClassificationService> _logger;
-    
-    // Absolute business indicators
-    private readonly HashSet<string> _absoluteBusinessIndicators = new()
-    {
-        "inc", "incorporated", "corp", "corporation", "ltd", "limited", 
-        "llc", "llp", "lp", "plc", "gmbh", "ag", "sa", "nv", "bv"
-    };
+    private readonly IBusinessWordService _businessWordService;
     
     public ContextClassificationService(
         PhonebookContext context,
-        ILogger<ContextClassificationService> logger)
+        ILogger<ContextClassificationService> logger,
+        IBusinessWordService businessWordService)
     {
         _context = context;
         _logger = logger;
+        _businessWordService = businessWordService;
     }
     
     public async Task<ClassificationResult> ClassifyAsync(string input)
@@ -41,10 +37,10 @@ public class ContextClassificationService : IClassificationService
         var normalizedInput = input.Trim().ToLowerInvariant();
         var words = normalizedInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         
-        // Check for absolute business indicators first
+        // Check for corporate suffixes using BusinessWordService
         foreach (var word in words)
         {
-            if (_absoluteBusinessIndicators.Contains(word.Trim('.')))
+            if (await _businessWordService.IsCorporateSuffixAsync(word.Trim('.')))
             {
                 return new ClassificationResult
                 {

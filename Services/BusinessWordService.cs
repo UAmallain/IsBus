@@ -16,13 +16,10 @@ public class BusinessWordService : IBusinessWordService
     private readonly IMemoryCache _cache;
     private readonly TimeSpan _cacheExpiration = TimeSpan.FromMinutes(30);
     
-    // Corporate suffixes that are absolute business indicators
-    private readonly HashSet<string> _corporateSuffixes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "inc", "incorporated", "corp", "corporation", 
-        "ltd", "limited", "llc", "llp", "lp", "plc",
-        "gmbh", "ag", "sa", "nv", "bv", "co", "company"
-    };
+    // Cache for corporate suffixes loaded from database
+    private HashSet<string>? _corporateSuffixes = null;
+    private DateTime _corporateSuffixesLoadTime = DateTime.MinValue;
+    private readonly TimeSpan _corporateSuffixCacheExpiration = TimeSpan.FromHours(24);
     
     public BusinessWordService(
         PhonebookContext context,
@@ -49,7 +46,8 @@ public class BusinessWordService : IBusinessWordService
         }
         
         // Check if it's a corporate suffix first
-        if (_corporateSuffixes.Contains(wordLower))
+        await EnsureCorporateSuffixesLoadedAsync();
+        if (_corporateSuffixes?.Contains(wordLower) ?? false)
         {
             var strength = BusinessIndicatorStrength.Absolute;
             _cache.Set(cacheKey, strength, _cacheExpiration);
@@ -139,7 +137,32 @@ public class BusinessWordService : IBusinessWordService
             return false;
             
         var wordLower = word.ToLower().Trim('.', ',', '\'', '"');
-        return _corporateSuffixes.Contains(wordLower);
+        
+        // Load or refresh corporate suffixes from database if needed
+        await EnsureCorporateSuffixesLoadedAsync();
+        
+        return _corporateSuffixes?.Contains(wordLower) ?? false;
+    }
+    
+    private async Task EnsureCorporateSuffixesLoadedAsync()
+    {
+        // Check if we need to reload the corporate suffixes
+        if (_corporateSuffixes == null || 
+            DateTime.UtcNow - _corporateSuffixesLoadTime > _corporateSuffixCacheExpiration)
+        {
+            // Load corporate suffixes from database 
+            // Now using 'corporate' word type OR business words with count >= 99999
+            var corporateSuffixes = await _context.WordData
+                .Where(w => w.WordType == "corporate" || 
+                           (w.WordType == "business" && w.WordCount >= 99999))
+                .Select(w => w.WordLower)
+                .ToListAsync();
+            
+            _corporateSuffixes = new HashSet<string>(corporateSuffixes, StringComparer.OrdinalIgnoreCase);
+            _corporateSuffixesLoadTime = DateTime.UtcNow;
+            
+            _logger.LogInformation($"Loaded {_corporateSuffixes.Count} corporate suffixes from database");
+        }
     }
     
     public async Task<Dictionary<string, BusinessIndicatorStrength>> AnalyzeWordsAsync(string[] words)
@@ -161,10 +184,13 @@ public class BusinessWordService : IBusinessWordService
             .Where(w => cleanWords.Contains(w.WordLower))
             .ToListAsync();
         
+        // Ensure corporate suffixes are loaded
+        await EnsureCorporateSuffixesLoadedAsync();
+        
         foreach (var word in cleanWords)
         {
             // Check corporate suffix first
-            if (_corporateSuffixes.Contains(word))
+            if (_corporateSuffixes?.Contains(word) ?? false)
             {
                 result[word] = BusinessIndicatorStrength.Absolute;
                 continue;

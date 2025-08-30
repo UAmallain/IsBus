@@ -10,29 +10,9 @@ public class ClassificationService : IClassificationService
     private readonly PhonebookContext _context;
     private readonly ILogger<ClassificationService> _logger;
     private readonly IWordFrequencyService _wordFrequencyService;
+    private readonly IBusinessWordService _businessWordService;
     
-    // Absolute business indicators - these override everything else
-    private readonly string[] _absoluteBusinessIndicators = new[]
-    {
-        "inc", "incorporated", "corp", "corporation", "ltd", "limited", 
-        "llc", "llp", "lp", "plc", "gmbh", "ag", "sa", "nv", "bv"
-    };
-    
-    // Patterns that strongly indicate business
-    private readonly string[] _strongBusinessPatterns = new[]
-    {
-        @"\b(enterprises|holdings|group|partners|associates|solutions|services)\b",
-        @"\b(consulting|management|marketing|agency|studio|clinic|center|centre)\b",
-        @"\b(restaurant|cafe|bistro|grill|pizza|sushi|bakery|deli|pub|bar|tavern)\b",
-        @"\b(shop|store|mart|market|boutique|outlet|supply|supplies)\b",
-        @"\b(salon|spa|fitness|gym|wellness|health|medical|dental|pharmacy)\b",
-        @"\b(hotel|motel|inn|lodge|resort|suites)\b",
-        @"\b(automotive|motors|auto|garage|repair|towing)\b",
-        @"\b(construction|contracting|roofing|plumbing|electric|hvac)\b",
-        @"\b(real estate|realty|properties|property management)\b"
-    };
-    
-    // Patterns that indicate residential (family names)
+    // Patterns that indicate residential (family names) - keep these for now
     private readonly string[] _residentialPatterns = new[]
     {
         @"^(the\s+)?[a-z]+s$", // The Smiths, Johnsons
@@ -44,11 +24,13 @@ public class ClassificationService : IClassificationService
     public ClassificationService(
         PhonebookContext context,
         ILogger<ClassificationService> logger,
-        IWordFrequencyService wordFrequencyService)
+        IWordFrequencyService wordFrequencyService,
+        IBusinessWordService businessWordService)
     {
         _context = context;
         _logger = logger;
         _wordFrequencyService = wordFrequencyService;
+        _businessWordService = businessWordService;
     }
 
     public async Task<ClassificationResult> ClassifyAsync(string input)
@@ -78,10 +60,10 @@ public class ClassificationService : IClassificationService
         // Initialize scoring components
         var scores = new Dictionary<string, double>();
         
-        // CHECK FOR ABSOLUTE BUSINESS INDICATORS FIRST
+        // CHECK FOR CORPORATE SUFFIXES USING BUSINESSWORDSERVICE
         foreach (var word in words)
         {
-            if (_absoluteBusinessIndicators.Contains(word.ToLower().Trim('.')))
+            if (await _businessWordService.IsCorporateSuffixAsync(word.ToLower().Trim('.')))
             {
                 scores["absolute_business"] = 100;
                 
@@ -101,7 +83,7 @@ public class ClassificationService : IClassificationService
         }
         
         // 1. Check for strong business patterns
-        var businessPatternScore = CheckBusinessPatterns(normalizedInput);
+        var businessPatternScore = await CheckBusinessPatternsAsync(normalizedInput);
         scores["business_patterns"] = businessPatternScore;
         
         // 2. Check for valid residential pattern FIRST
@@ -209,16 +191,32 @@ public class ClassificationService : IClassificationService
         return result;
     }
     
-    private double CheckBusinessPatterns(string input)
+    private async Task<double> CheckBusinessPatternsAsync(string input)
     {
+        // Analyze the phrase using BusinessWordService
+        var words = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var wordStrengths = await _businessWordService.AnalyzeWordsAsync(words);
+        
         double score = 0;
-        foreach (var pattern in _strongBusinessPatterns)
+        foreach (var kvp in wordStrengths)
         {
-            if (Regex.IsMatch(input, pattern, RegexOptions.IgnoreCase))
+            switch (kvp.Value)
             {
-                score += 30;
+                case BusinessIndicatorStrength.Absolute:
+                    score += 50;
+                    break;
+                case BusinessIndicatorStrength.Strong:
+                    score += 40;
+                    break;
+                case BusinessIndicatorStrength.Medium:
+                    score += 30;
+                    break;
+                case BusinessIndicatorStrength.Weak:
+                    score += 10;
+                    break;
             }
         }
+        
         return Math.Min(score, 80); // Cap at 80
     }
     

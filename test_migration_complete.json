@@ -1,0 +1,42 @@
+[
+  {
+    "input": "A P Reid Insurance Stores Inc Moncton 123-4567",
+    "expectedIsBusinessName": true,
+    "description": "Corporate suffix 'Inc' (99999 count) should force business classification"
+  },
+  {
+    "input": "Abraham Kaine 17 Kingsmere 388-3515",
+    "expectedIsBusinessName": false,
+    "expectedIsResidentialName": true,
+    "description": "Name counts higher than business counts - should be residential"
+  },
+  {
+    "input": "Dr Johnson 123 Main St 555-1234",
+    "expectedIsBusinessName": false,
+    "expectedIsResidentialName": true,
+    "description": "Title word 'Dr' (99998 count) indicates residential"
+  },
+  {
+    "input": "123 Main Street 555-0000",
+    "expectedAddress": "123 Main Street",
+    "description": "Road indicator 'Street' (99997 count) should help identify address"
+  },
+  {
+    "input": "Johnson LLC Downtown Halifax 555-1234",
+    "expectedIsBusinessName": true,
+    "description": "Corporate suffix 'LLC' and location word 'Downtown' (99996 count)"
+  },
+  {
+    "input": "Mary's Bakery 456 Oak Ave 555-2222",
+    "expectedIsBusinessName": true,
+    "expectedAddress": "456 Oak Ave",
+    "description": "Business word 'Bakery' (3000 count) with address containing 'Ave' road indicator"
+  },
+  {
+    "input": "The Smith Family 789 Pine Rd 555-3333",
+    "expectedIsBusinessName": false,
+    "expectedIsResidentialName": true,
+    "expectedAddress": "789 Pine Rd",
+    "description": "Residential indicator 'Family' (99995 count) with road indicator 'Rd'"
+  }
+]
