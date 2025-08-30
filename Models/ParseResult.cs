@@ -28,6 +28,7 @@ public class ParseRequest
     public string Input { get; set; } = string.Empty;
     public string? Province { get; set; } // Optional: NS, NB, PE, NL, etc.
     public string? AreaCode { get; set; } // Optional: 3-digit area code (e.g., "902", "506")
+    public bool? EnableLearning { get; set; } // Optional: Enable word learning from this parse (null = use default)
 }
 
 public class BatchParseRequest
@@ -35,6 +36,7 @@ public class BatchParseRequest
     public List<string> Inputs { get; set; } = new();
     public string? Province { get; set; } // Optional: applies to all inputs in batch
     public string? AreaCode { get; set; } // Optional: applies to all inputs in batch
+    public bool? EnableLearning { get; set; } // Optional: Enable word learning from this batch (null = use default)
 }
 
 public class BatchParseResult

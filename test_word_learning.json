@@ -1,0 +1,26 @@
+[
+  {
+    "input": "Allain Marc Riverview 555-5555",
+    "expectedIsResidentialName": true,
+    "expectedLastName": "Allain",
+    "expectedFirstName": "Marc",
+    "description": "Should learn 'Allain' as last name and 'Marc' as first name"
+  },
+  {
+    "input": "Moncton Boys & Girls Club 123 Somestreet Dr 555-5555",
+    "expectedIsBusinessName": true,
+    "description": "Should learn 'Boys', 'Girls', 'Club' as business words (not Moncton - it's a community)"
+  },
+  {
+    "input": "Johnson Michael 456 Main St 555-1234",
+    "expectedIsResidentialName": true,
+    "expectedLastName": "Johnson",
+    "expectedFirstName": "Michael",
+    "description": "Should learn 'Johnson' as last name and 'Michael' as first name"
+  },
+  {
+    "input": "Pizza Palace 789 Oak Ave 555-0000",
+    "expectedIsBusinessName": true,
+    "description": "Should learn 'Palace' as business word (Pizza already has high count)"
+  }
+]

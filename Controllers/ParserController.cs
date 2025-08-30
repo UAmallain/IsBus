@@ -9,28 +9,20 @@ namespace IsBus.Controllers;
 public class ParserController : ControllerBase
 {
     private readonly IStringParserService _parserService;
+    private readonly IWordLearningService _wordLearningService;
     private readonly ILogger<ParserController> _logger;
+    private readonly IConfiguration _configuration;
     
     public ParserController(
         IStringParserService parserService,
-        ILogger<ParserController> logger)
+        IWordLearningService wordLearningService,
+        ILogger<ParserController> logger,
+        IConfiguration configuration)
     {
         _parserService = parserService;
+        _wordLearningService = wordLearningService;
         _logger = logger;
-    }
-    
-    /// <summary>
-    /// Debug endpoint for Abraham Kaine case
-    /// </summary>
-    [HttpGet("debug/abraham")]
-    public async Task<IActionResult> DebugAbraham()
-    {
-        var result = await _parserService.ParseAsync("Abraham Kaine 17 Kingsmere 388-3515");
-        return Ok(new
-        {
-            ParseResult = result,
-            Message = "Check logs for detailed analysis"
-        });
+        _configuration = configuration;
     }
     
     /// <summary>
@@ -55,6 +47,28 @@ public class ParserController : ControllerBase
             if (!result.Success)
             {
                 return BadRequest(result);
+            }
+            
+            // Learn from successful parse if enabled
+            var enableLearning = request.EnableLearning ?? _configuration.GetValue<bool>("WordLearning:EnabledByDefault", false);
+            
+            if (enableLearning)
+            {
+                try
+                {
+                    _logger.LogInformation($"Learning enabled - attempting to learn from parse result for: {request.Input}");
+                    var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(result);
+                    _logger.LogInformation($"Word learning service returned {wordsLearned} words learned from: {request.Input}");
+                }
+                catch (Exception learnEx)
+                {
+                    // Don't fail the request if learning fails
+                    _logger.LogError(learnEx, "Failed to learn from parse result for input: {Input}", request.Input);
+                }
+            }
+            else
+            {
+                _logger.LogDebug($"Learning disabled for parse request: {request.Input}");
             }
             
             return Ok(result);
@@ -105,6 +119,37 @@ public class ParserController : ControllerBase
         try
         {
             var result = await _parserService.ParseBatchAsync(request.Inputs, request.Province, request.AreaCode);
+            
+            // Learn from successful parses in batch if enabled
+            var enableLearning = request.EnableLearning ?? _configuration.GetValue<bool>("WordLearning:EnabledByDefault", false);
+            
+            if (enableLearning)
+            {
+                try
+                {
+                    int totalWordsLearned = 0;
+                    foreach (var parseResult in result.Results.Where(r => r.Success))
+                    {
+                        var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(parseResult);
+                        totalWordsLearned += wordsLearned;
+                    }
+                    
+                    if (totalWordsLearned > 0)
+                    {
+                        _logger.LogInformation($"Learned {totalWordsLearned} words from batch of {result.SuccessCount} successful parses");
+                    }
+                }
+                catch (Exception learnEx)
+                {
+                    // Don't fail the request if learning fails
+                    _logger.LogWarning(learnEx, "Failed to learn from batch parse results");
+                }
+            }
+            else
+            {
+                _logger.LogDebug($"Learning disabled for batch parse request with {request.Inputs.Count} inputs");
+            }
+            
             return Ok(result);
         }
         catch (Exception ex)
@@ -122,7 +167,7 @@ public class ParserController : ControllerBase
     /// Parse a string from query parameter (GET method)
     /// </summary>
     [HttpGet("parse")]
-    public async Task<IActionResult> ParseGet([FromQuery] string input, [FromQuery] string? province = null, [FromQuery] string? areaCode = null)
+    public async Task<IActionResult> ParseGet([FromQuery] string input, [FromQuery] string? province = null, [FromQuery] string? areaCode = null, [FromQuery] bool? enableLearning = null)
     {
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -140,6 +185,28 @@ public class ParserController : ControllerBase
             if (!result.Success)
             {
                 return BadRequest(result);
+            }
+            
+            // Learn from successful parse if enabled
+            var shouldLearn = enableLearning ?? _configuration.GetValue<bool>("WordLearning:EnabledByDefault", false);
+            
+            if (shouldLearn)
+            {
+                try
+                {
+                    _logger.LogInformation($"[GET] Learning enabled - attempting to learn from parse result for: {input}");
+                    var wordsLearned = await _wordLearningService.LearnFromParseResultAsync(result);
+                    _logger.LogInformation($"[GET] Word learning service returned {wordsLearned} words learned from: {input}");
+                }
+                catch (Exception learnEx)
+                {
+                    // Don't fail the request if learning fails
+                    _logger.LogError(learnEx, "[GET] Failed to learn from parse result for input: {Input}", input);
+                }
+            }
+            else
+            {
+                _logger.LogDebug($"[GET] Learning disabled for parse request: {input}");
             }
             
             return Ok(result);
