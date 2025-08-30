@@ -98,6 +98,8 @@ public class DatabaseDrivenParserService : IStringParserService
         bool looksLikeResidentialWithInitials = false;
         string residentialInitialPattern = "";
         
+        // Only check for initial patterns if we're looking at exactly 3 words
+        // This preliminary check can be overridden by strong business indicators
         if (wordsForCheck.Length == 3)
         {
             // Check if first and last are single letters (initials)
@@ -113,13 +115,13 @@ public class DatabaseDrivenParserService : IStringParserService
             {
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "initial-surname-initial";
-                _logger.LogDebug($"Detected residential pattern 'initial surname initial': {remainingText}");
+                _logger.LogDebug($"Detected POTENTIAL residential pattern 'initial surname initial': {remainingText}");
             }
             else if (firstIsInitial && secondIsInitial && lastIsName)
             {
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "initial-initial-surname";
-                _logger.LogDebug($"Detected residential pattern 'initial initial surname': {remainingText}");
+                _logger.LogDebug($"Detected POTENTIAL residential pattern 'initial initial surname': {remainingText}");
             }
         }
         
@@ -130,12 +132,23 @@ public class DatabaseDrivenParserService : IStringParserService
         bool hasStrongBusinessWords = businessAnalysis.isBusiness && 
                                       businessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong;
         
+        // Log the business analysis result for debugging
+        _logger.LogDebug($"Business analysis for '{remainingText}': isBusiness={businessAnalysis.isBusiness}, maxStrength={businessAnalysis.maxStrength}, reason={businessAnalysis.reason}");
+        
         if (hasStrongBusinessWords)
         {
             forceAsBusiness = true;
             isLikelyBusiness = true;
             looksLikeResidentialWithInitials = false; // Override any residential pattern
-            _logger.LogDebug($"Business analysis: {businessAnalysis.reason}");
+            _logger.LogDebug($"Strong business indicators found - overriding any residential pattern");
+        }
+        // Even if not classified as business by phrase analysis, check for absolute indicators
+        else if (businessAnalysis.maxStrength == BusinessIndicatorStrength.Absolute)
+        {
+            forceAsBusiness = true;
+            isLikelyBusiness = true;
+            looksLikeResidentialWithInitials = false; // Override any residential pattern
+            _logger.LogDebug($"Absolute business indicator found - forcing as business");
         }
         
         // Also check for corporate suffixes which are absolute indicators

@@ -1,0 +1,17 @@
+[
+  {
+    "input": "A W Leil Cranes & Equipment Ltd 123-4567",
+    "expectedIsBusinessName": true,
+    "description": "Contains 'Cranes' (business=112, no name entries) and 'Equipment' (business=5054, no name entries) plus 'Ltd' suffix"
+  },
+  {
+    "input": "Bob Equipment Services 555-1234",
+    "expectedIsBusinessName": true,
+    "description": "Equipment is a strong business-only word"
+  },
+  {
+    "input": "Crane Operators Union 555-0000",
+    "expectedIsBusinessName": true,
+    "description": "Business-specific industry terms"
+  }
+]

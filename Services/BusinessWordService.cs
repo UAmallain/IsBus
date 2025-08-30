@@ -269,24 +269,45 @@ public class BusinessWordService : IBusinessWordService
         var words = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var wordStrengths = await AnalyzeWordsAsync(words);
         
-        // Debug logging for Abraham Kaine case
-        if (phrase.Contains("Abraham", StringComparison.OrdinalIgnoreCase))
+        // Debug logging for important cases
+        if (phrase.Contains("Abraham", StringComparison.OrdinalIgnoreCase) || 
+            phrase.Contains("Equipment", StringComparison.OrdinalIgnoreCase) ||
+            phrase.Contains("Cranes", StringComparison.OrdinalIgnoreCase) ||
+            phrase.Contains("Leil", StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation($"Analyzing phrase: {phrase}");
+            _logger.LogInformation($"Analyzing phrase: '{phrase}'");
+            _logger.LogInformation($"  Word count in phrase: {words.Length}");
+            _logger.LogInformation($"  Words analyzed: {wordStrengths.Count}");
             
-            // Get detailed counts for Abraham
-            var abrahamData = await _context.WordData
-                .Where(w => w.WordLower == "abraham")
-                .ToListAsync();
-            
-            foreach (var data in abrahamData)
-            {
-                _logger.LogInformation($"  Abraham - {data.WordType}: {data.WordCount}");
-            }
-            
+            // Log detailed word analysis
             foreach (var kvp in wordStrengths)
             {
                 _logger.LogInformation($"  Word '{kvp.Key}' strength: {kvp.Value}");
+                
+                // Get detailed counts for this word
+                var wordData = await _context.WordData
+                    .Where(w => w.WordLower == kvp.Key.ToLower())
+                    .ToListAsync();
+                
+                foreach (var data in wordData)
+                {
+                    _logger.LogInformation($"    {kvp.Key} - {data.WordType}: {data.WordCount}");
+                }
+                
+                if (!wordData.Any())
+                {
+                    _logger.LogInformation($"    {kvp.Key} - NO DATABASE ENTRIES");
+                }
+            }
+            
+            // Also check words that might have been skipped
+            foreach (var word in words)
+            {
+                var cleanWord = word.ToLower().Trim('.', ',', '\'', '"');
+                if (!wordStrengths.ContainsKey(cleanWord))
+                {
+                    _logger.LogInformation($"  Word '{cleanWord}' was not analyzed (likely duplicate or empty)");
+                }
             }
         }
         
