@@ -18,6 +18,7 @@ public class PhonebookContext : DbContext
     public DbSet<RoadNetwork> RoadNetworks { get; set; }
     public DbSet<ProvinceMapping> ProvinceMappings { get; set; }
     public DbSet<StreetTypeMapping> StreetTypeMappings { get; set; }
+    public DbSet<BusinessIndicator> BusinessIndicators { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

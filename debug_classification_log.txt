@@ -1,20 +1,24 @@
-﻿=== DEBUG TEST RUN - 2025-08-31 09:05:05 ===
+﻿=== DEBUG TEST RUN - 2025-08-31 11:38:30 ===
 
 ================================================================================
 INPUT: Adshade Wilfred 231 Westminster Av Riverview 386-8496
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adshade Wilfred
+  First Name: Wilfred
+  Last Name: Adshade
   Address: 231 Westminster Av Riverview
   Phone: 5063868496
 
 ================================================================================
 INPUT: Adsett Robert B 210 Country View Rd 384-8266
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adsett Robert B
+  First Name: Robert B
+  Last Name: Adsett
   Address: 210 Country View Rd
   Phone: 5063848266
 
@@ -22,48 +26,54 @@ RESULT: BUSINESS
 INPUT: Adesina A Mountain Rd 830-7098
 ================================================================================
 RESULT: RESIDENTIAL
-  Confidence: 50%
-  Name: Adesina
-  First Name: 
+  Confidence: 85%
+  Name: Adesina A
+  First Name: A
   Last Name: Adesina
-  Address: A Mountain Rd
+  Address: 
   Phone: 5068307098
 
 ================================================================================
 INPUT: Adesina 0 382-4955
 ================================================================================
 RESULT: RESIDENTIAL
-  Confidence: 50%
-  Name: Adesina
-  First Name: 
+  Confidence: 85%
+  Name: Adesina O
+  First Name: O
   Last Name: Adesina
-  Address: 0
+  Address: 
   Phone: 5063824955
 
 ================================================================================
 INPUT: Adeoye Haqq 183 Oakfield Dr 386-4519
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adeoye Haqq
+  First Name: Haqq
+  Last Name: Adeoye
   Address: 183 Oakfield Dr
   Phone: 5063864519
 
 ================================================================================
 INPUT: Adebukola Bada 115 Lorne St 388-2674
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adebukola Bada
+  First Name: Bada
+  Last Name: Adebukola
   Address: 115 Lorne St
   Phone: 5063882674
 
 ================================================================================
 INPUT: Addington Andrea 26 Fairlane Dr 851-1340
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Addington Andrea
+  First Name: Andrea
+  Last Name: Addington
   Address: 26 Fairlane Dr
   Phone: 5068511340
 
@@ -79,90 +89,110 @@ RESULT: BUSINESS
 ================================================================================
 INPUT: Adams Walter 88 Sunset Rd 853-4115
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adams Walter
+  First Name: Walter
+  Last Name: Adams
   Address: 88 Sunset Rd
   Phone: 5068534115
 
 ================================================================================
 INPUT: Adams Todd 1009 Cleveland Av 853-8202
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adams Todd
+  First Name: Todd
+  Last Name: Adams
   Address: 1009 Cleveland Av
   Phone: 5068538202
 
 ================================================================================
 INPUT: Adams T 925 Elmwood Dr 204-4110
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
   Name: Adams T
+  First Name: T
+  Last Name: Adams
   Address: 925 Elmwood Dr
   Phone: 5062044110
 
 ================================================================================
 INPUT: Adams S Grindstone Dr 854-8144
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
-  Name: Adams S Grindstone Dr
+  Name: Adams S
+  First Name: S
+  Last Name: Adams
   Address: 
   Phone: 5068548144
 
 ================================================================================
 INPUT: Adams Nick 7 Parkwood Av 533-7099
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adams Nick
+  First Name: Nick
+  Last Name: Adams
   Address: 7 Parkwood Av
   Phone: 5065337099
 
 ================================================================================
 INPUT: Adams M 97 Notingham Dr 204-8479
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
   Name: Adams M
+  First Name: M
+  Last Name: Adams
   Address: 97 Notingham Dr
   Phone: 5062048479
 
 ================================================================================
 INPUT: Adams Jessica 19 Naples Dr 854-1588
 ================================================================================
-RESULT: BUSINESS
-  Confidence: 85%
+RESULT: RESIDENTIAL
+  Confidence: 100%
   Name: Adams Jessica
+  First Name: Jessica
+  Last Name: Adams
   Address: 19 Naples Dr
   Phone: 5068541588
 
 ================================================================================
 INPUT: Adams D 115 Chateau Dr 857-0697
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
   Name: Adams D
+  First Name: D
+  Last Name: Adams
   Address: 115 Chateau Dr
   Phone: 5068570697
 
 ================================================================================
 INPUT: Adair A 53 Dundee Dr 372-9518
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
   Name: Adair A
+  First Name: A
+  Last Name: Adair
   Address: 53 Dundee Dr
   Phone: 5063729518
 
 ================================================================================
 INPUT: Ackman F Douglas Dr Cap - BrÃ»lÃ© 532-3836
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
-  Name: Ackman F Douglas Dr Cap - Brûlé
+  Name: Ackman F
+  First Name: F
+  Last Name: Ackman
   Address: 
   Phone: 5065323836
 
@@ -170,9 +200,9 @@ RESULT: BUSINESS
 INPUT: Abli R A22 21 Arden St 830-8056
 ================================================================================
 RESULT: RESIDENTIAL
-  Confidence: 80%
-  Name: Abli R A22
-  First Name: R A22
+  Confidence: 85%
+  Name: Abli R
+  First Name: R
   Last Name: Abli
   Address: 21 Arden St
   Phone: 5068308056
@@ -180,18 +210,22 @@ RESULT: RESIDENTIAL
 ================================================================================
 INPUT: Aberathna B 150 Wynwood Dr 830-7163
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
   Name: Aberathna B
+  First Name: B
+  Last Name: Aberathna
   Address: 150 Wynwood Dr
   Phone: 5068307163
 
 ================================================================================
 INPUT: Abdelhadi Z 152 Holland Dr 830-2167
 ================================================================================
-RESULT: BUSINESS
+RESULT: RESIDENTIAL
   Confidence: 85%
   Name: Abdelhadi Z
+  First Name: Z
+  Last Name: Abdelhadi
   Address: 152 Holland Dr
   Phone: 5068302167
 

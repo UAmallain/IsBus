@@ -17,6 +17,7 @@ public class DatabaseDrivenParserService : IStringParserService
     private readonly IStreetTypeService _streetTypeService;
     private readonly IStreetNameService _streetNameService;
     private readonly IBusinessWordService _businessWordService;
+    private readonly IReferenceDataService _referenceDataService;
     private readonly PhonebookContext _context;
     private readonly ILogger<DatabaseDrivenParserService> _logger;
     
@@ -35,6 +36,7 @@ public class DatabaseDrivenParserService : IStringParserService
         IStreetTypeService streetTypeService,
         IStreetNameService streetNameService,
         IBusinessWordService businessWordService,
+        IReferenceDataService referenceDataService,
         PhonebookContext context,
         ILogger<DatabaseDrivenParserService> logger)
     {
@@ -43,6 +45,7 @@ public class DatabaseDrivenParserService : IStringParserService
         _streetTypeService = streetTypeService;
         _streetNameService = streetNameService;
         _businessWordService = businessWordService;
+        _referenceDataService = referenceDataService;
         _context = context;
         _logger = logger;
     }
@@ -50,6 +53,7 @@ public class DatabaseDrivenParserService : IStringParserService
     public async Task<ParseResult> ParseAsync(string input, string? province = null, string? areaCode = null)
     {
         var result = new ParseResult { Input = input };
+        var originalInput = input; // Keep original for debug logging
         
         if (string.IsNullOrWhiteSpace(input))
         {
@@ -73,11 +77,37 @@ public class DatabaseDrivenParserService : IStringParserService
         input = input.Replace('_', ' '); // Replace underscores with spaces
         input = Regex.Replace(input.Trim(), @"\s+", " "); // Collapse multiple spaces to single space
         
+        // Special debug logging for problematic records
+        var debugRecords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "Aguayo Jesus Riverview 204-7610",
+            "Albert Luc Grand - Barachois 532-6339",
+            "Aldred Devon 86 Jasmine 388-1009",
+            "Alia Abdulsatar 140 Gordon 384-1669",
+            "Allain Real 546 Main 532-4500",
+            "Allen J Salisbury West 372-4111",
+            "Alley Jim Steeves Mountain 869-8981",
+            "allis randy 854-1889",
+            "Alta Musica Riverview 857-4290",
+            "Alward Vernon 123 Fredericton Rd 372-5317",
+            "Amberman Ms 858-9860",
+            "Andrade Genesis 11 Breau 576-7667",
+            "Andrews Max 196 King 856-9989",
+            "Arc Andre Leblanc 1132 Route 133 Beaubassin East 533-8322",
+            "Arsenault Brandon 388-7131"
+        };
+        
+        bool isDebugRecord = debugRecords.Contains(originalInput);
+        if (isDebugRecord)
+        {
+            _logger.LogWarning($"=== DEBUG RECORD START: '{originalInput}' ===");
+        }
+        
         // OCR Error Detection and Correction
         input = await DetectAndCorrectOCRErrors(input, province);
         
         // Step 1: Extract phone number
-        var phoneExtraction = ExtractPhoneNumber(input, areaCode);
+        var phoneExtraction = await ExtractPhoneNumber(input, areaCode);
         if (!phoneExtraction.Success)
         {
             result.Success = false;
@@ -180,14 +210,8 @@ public class DatabaseDrivenParserService : IStringParserService
         string extractedAddress = "";
         var wordsForAnalysis = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         
-        // Common street types that should not be analyzed as business indicators
-        var streetTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "St", "Street", "Ave", "Av", "Avenue", "Dr", "Drive", "Rd", "Road",
-            "Blvd", "Boulevard", "Ln", "Lane", "Ct", "Court", "Pl", "Place",
-            "Way", "Pkwy", "Parkway", "Terr", "Terrace", "Cir", "Circle",
-            "Sq", "Square", "Crescent", "Cres", "Highway", "Hwy", "Trail", "Tr"
-        };
+        // Get street types from database
+        var streetTypes = await _referenceDataService.GetStreetTypesAsync();
         
         // Find where the address likely starts - look for patterns like:
         // 1. Number followed by street name (e.g., "123 Main St")
@@ -236,7 +260,15 @@ public class DatabaseDrivenParserService : IStringParserService
         }
         
         // Use BusinessWordService to analyze ONLY the name portion for business indicators
+        if (isDebugRecord)
+        {
+            _logger.LogWarning($"DEBUG: Analyzing name portion for business indicators: '{namePortionForAnalysis}'");
+        }
         var businessAnalysis = await _businessWordService.AnalyzePhraseAsync(namePortionForAnalysis);
+        if (isDebugRecord)
+        {
+            _logger.LogWarning($"DEBUG: Business analysis result - isBusiness: {businessAnalysis.isBusiness}, maxStrength: {businessAnalysis.maxStrength}");
+        }
         
         // Check if we have strong business indicators
         bool hasStrongBusinessWords = businessAnalysis.isBusiness && 
@@ -524,11 +556,8 @@ public class DatabaseDrivenParserService : IStringParserService
                 // Business terminators should not be treated as addresses
                 var lastWordToCheck = words.Length > 0 ? words[^1].Trim('.', ',') : "";
                 
-                var businessEndings = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    "Ltd", "Limited", "Inc", "Incorporated", "Corp", "Corporation",
-                    "LLC", "LLP", "Sons", "Bros", "Brothers", "Co", "Company"
-                };
+                // Get business endings from database
+                var businessEndings = await _referenceDataService.GetBusinessEndingsAsync();
                 
                 // Only check for communities if the last word is NOT a business terminator
                 if (!businessEndings.Contains(lastWordToCheck))
@@ -888,8 +917,18 @@ public class DatabaseDrivenParserService : IStringParserService
             // Classify the name
             if (!string.IsNullOrWhiteSpace(result.Name))
             {
+                if (isDebugRecord)
+                {
+                    _logger.LogWarning($"DEBUG: Classifying name from phonebook parse: '{result.Name}'");
+                }
+                
                 // Use BusinessWordService to check if the name contains strong business indicators
                 var nameBusinessAnalysis = await _businessWordService.AnalyzePhraseAsync(result.Name);
+                
+                if (isDebugRecord)
+                {
+                    _logger.LogWarning($"DEBUG: Name business analysis - isBusiness: {nameBusinessAnalysis.isBusiness}, maxStrength: {nameBusinessAnalysis.maxStrength}");
+                }
                 
                 if (nameBusinessAnalysis.isBusiness && 
                     nameBusinessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong)
@@ -898,6 +937,11 @@ public class DatabaseDrivenParserService : IStringParserService
                     result.IsBusinessName = true;
                     result.IsResidentialName = false;
                     result.Confidence.NameConfidence = 95; // High confidence due to strong business words
+                    
+                    if (isDebugRecord)
+                    {
+                        _logger.LogWarning($"DEBUG: FORCED AS BUSINESS due to strong indicators");
+                    }
                 }
                 else
                 {
@@ -905,6 +949,11 @@ public class DatabaseDrivenParserService : IStringParserService
                     result.IsBusinessName = classification.IsBusiness;
                     result.IsResidentialName = classification.IsResidential;
                     result.Confidence.NameConfidence = classification.Confidence;
+                    
+                    if (isDebugRecord)
+                    {
+                        _logger.LogWarning($"DEBUG: Classification result - IsBusiness: {classification.IsBusiness}, IsResidential: {classification.IsResidential}, Confidence: {classification.Confidence}");
+                    }
                     
                     // Split residential names into LastName and FirstName
                     if (result.IsResidentialName)
@@ -1022,6 +1071,18 @@ public class DatabaseDrivenParserService : IStringParserService
         result.Confidence.PhoneConfidence = 100;
         result.Success = true;
         
+        if (isDebugRecord)
+        {
+            _logger.LogWarning($"=== DEBUG RECORD END: '{originalInput}' ===");
+            _logger.LogWarning($"    Final Classification: {(result.IsBusinessName ? "BUSINESS" : "RESIDENTIAL")}");
+            _logger.LogWarning($"    Name: '{result.Name}'");
+            _logger.LogWarning($"    LastName: '{result.LastName}'");
+            _logger.LogWarning($"    FirstName: '{result.FirstName}'");
+            _logger.LogWarning($"    Address: '{result.Address}'");
+            _logger.LogWarning($"    Phone: '{result.Phone}'");
+            _logger.LogWarning($"    Confidence: {result.Confidence.NameConfidence}%");
+        }
+        
         _logger.LogInformation($"Parsed: '{input}' -> Name: '{result.Name}', Address: '{result.Address}', Phone: '{result.Phone}'");
         
         return result;
@@ -1035,7 +1096,8 @@ public class DatabaseDrivenParserService : IStringParserService
         // First, find ALL street type positions in the text
         // But exclude province codes that might look like street types
         var streetTypePositions = new List<int>();
-        var provinceAbbreviations = new HashSet<string> { "AB", "BC", "MB", "NB", "NL", "NS", "NT", "NU", "ON", "PE", "QC", "SK", "YT" };
+        // Get province codes from database
+        var provinceAbbreviations = await _referenceDataService.GetProvinceCodesAsync();
         
         for (int i = 0; i < words.Length; i++)
         {
@@ -1541,7 +1603,14 @@ public class DatabaseDrivenParserService : IStringParserService
         else if (addressParts.Count > 0)
         {
             var firstAddressWord = addressParts[0].ToLower();
-            var businessSuffixes = new HashSet<string> { "sons", "bros", "brothers", "sisters", "and" };
+            // Get business suffixes from database (secondary indicators)
+            var businessIndicatorList = await _context.BusinessIndicators
+                .Where(b => (b.IndicatorType == "secondary_indicator" || b.IndicatorType == "primary_suffix") 
+                    && (b.IsActive ?? true))
+                .Select(b => b.IndicatorText.ToLower())
+                .ToListAsync();
+            var businessIndicators = new HashSet<string>(businessIndicatorList, StringComparer.OrdinalIgnoreCase);
+            var businessSuffixes = businessIndicators;
             
             if (businessSuffixes.Contains(firstAddressWord))
             {
@@ -1586,16 +1655,8 @@ public class DatabaseDrivenParserService : IStringParserService
         var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var match = new CommunityMatch { Found = false };
         
-        // Common words that should never be considered as community names
-        var skipWords = new HashSet<string>(StringComparer.OrdinalIgnoreCase) 
-        { 
-            "and", "the", "of", "for", "to", "at", "in", "on", "by", "with", 
-            "from", "or", "but", "not", "all", "can", "her", "was", "one", 
-            "our", "out", "his", "has", "had", "were", "been", "have", "their",
-            "a", "an", "as", "are", "is", "it", "its", "be", "been", "being",
-            "administration", "sales", "services", "management", "consulting",
-            "solutions", "systems", "technologies", "enterprises", "industries"
-        };
+        // Get skip words from database
+        var skipWords = await _referenceDataService.GetSkipWordsAsync("general");
         
         // Check each word or combination to see if it's a known community
         for (int i = 0; i < words.Length; i++)
@@ -1677,7 +1738,7 @@ public class DatabaseDrivenParserService : IStringParserService
         return -1;
     }
     
-    private PhoneExtractionResult ExtractPhoneNumber(string input, string? defaultAreaCode = null)
+    private async Task<PhoneExtractionResult> ExtractPhoneNumber(string input, string? defaultAreaCode = null)
     {
         var result = new PhoneExtractionResult();
         
@@ -1710,10 +1771,8 @@ public class DatabaseDrivenParserService : IStringParserService
                 _logger.LogInformation($"Last word before area code: '{lastWord}'");
                 
                 // Road types that are followed by numbers (like Highway 205, Route 101)
-                var roadIndicators = new HashSet<string> { 
-                    "highway", "hwy", "route", "rte", "road", "rd", 
-                    "chemin", "ch", "autoroute", "aut"
-                };
+                // Get road indicators from database
+                var roadIndicators = await _referenceDataService.GetRoadIndicatorsAsync();
                 
                 if (roadIndicators.Contains(lastWord))
                 {
@@ -1774,21 +1833,16 @@ public class DatabaseDrivenParserService : IStringParserService
                         var prevWord = words[^2].ToLower().TrimEnd('.', ',');
                         // Suite indicators and road types that are followed by numbers
                         // The number stays with the address, not the phone
-                        var suiteIndicators = new HashSet<string> { 
-                            // Suite/unit indicators
-                            "suite", "ste", "unit", "apt", "apartment", "room", "rm", "floor", "fl",
-                            // Road types that are followed by numbers (like Highway 205, Route 101)
-                            "highway", "hwy", "route", "rte", "road", "rd", "street", "st",
-                            "avenue", "ave", "av", "boulevard", "blvd", "drive", "dr",
-                            "lane", "ln", "place", "pl", "court", "ct", "circle", "cir",
-                            "trail", "tr", "path", "parkway", "pkwy", "way",
-                            // French road types
-                            "chemin", "ch", "rue", "autoroute", "aut", "voie"
-                        };
+                        // Get suite indicators and road indicators from database
+                        var suiteIndicators = await _referenceDataService.GetSuiteIndicatorsAsync();
+                        var roadIndicators = await _referenceDataService.GetRoadIndicatorsAsync();
+                        
+                        // Combine them for this check
+                        var allIndicators = new HashSet<string>(suiteIndicators.Union(roadIndicators), StringComparer.OrdinalIgnoreCase);
                         
                         _logger.LogDebug($"Checking if '{prevWord}' is a suite/road indicator (3-digit number: {lastWord})");
                         
-                        if (suiteIndicators.Contains(prevWord))
+                        if (allIndicators.Contains(prevWord))
                         {
                             // This is a suite/unit number, not an area code
                             result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);

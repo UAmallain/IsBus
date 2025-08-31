@@ -80,6 +80,7 @@ builder.Services.AddScoped<ICommunityService, CommunityService>();
 builder.Services.AddScoped<IStreetTypeService, EnhancedStreetTypeService>(); // Uses street_type_mapping table
 builder.Services.AddScoped<IStreetNameService, EnhancedStreetNameService>(); // Uses road_network table (2.25M+ records)
 builder.Services.AddScoped<IRoadNetworkStreetService, RoadNetworkStreetService>();
+builder.Services.AddScoped<IReferenceDataService, ReferenceDataService>(); // Reference data from database tables
 builder.Services.AddScoped<IStringParserService, DatabaseDrivenParserService>(); // Database-driven parser that finds longest matching street
 
 builder.Services.AddHealthChecks();
