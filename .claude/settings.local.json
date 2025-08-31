@@ -90,7 +90,17 @@
       "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
       "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 34852)",
       "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 64948)",
-      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 21456)"
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 21456)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 55420)",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe run --urls \"http://0.0.0.0:5086\")",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe run)",
+      "Bash(chmod:*)",
+      "Bash(/mnt/c/Users/mallain/Source/repos/PhoneBookParserAPI/test_suite_cases.sh)",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe run TestSuiteDetection.cs)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 46696)",
+      "Bash(./TestSuiteDetection.exe)",
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe script TestSuiteDetection.cs)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 34728)"
     ],
     "deny": [],
     "ask": []

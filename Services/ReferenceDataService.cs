@@ -154,8 +154,14 @@ public class ReferenceDataService : IReferenceDataService
         
         if (!_cache.TryGetValue<HashSet<string>>(cacheKey, out var indicators))
         {
-            // Define suite indicators (could be added to business_indicators with a specific type)
-            var suiteWords = new[] { "Suite", "Unit", "Apt", "Apartment", "Room", "Rm", "Floor", "Fl", "#" };
+            // Define suite indicators that typically precede numbers
+            // These help distinguish suite numbers from area codes
+            var suiteWords = new[] { 
+                "Suite", "Ste", "Unit", "Apt", "Apartment", 
+                "Room", "Rm", "Floor", "Fl", "#",
+                "Box", "Lot", "Space", "Slip", "Pier",
+                "Building", "Bldg", "Tower", "Level"
+            };
             
             indicators = new HashSet<string>(suiteWords, StringComparer.OrdinalIgnoreCase);
             

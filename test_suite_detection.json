@@ -1,0 +1,50 @@
+[
+  {
+    "input": "Abed Sangani Masoud Dr 100 Arden Suite 209857-5732",
+    "expected": "Suite number should be '209' and phone should be '857-5732'"
+  },
+  {
+    "input": "Smith John 123 Main St Apt 4506234-5678",
+    "expected": "Suite number should be '450' and phone should be '623-4567'"
+  },
+  {
+    "input": "Johnson Mary 456 Oak Ave Unit 12789432-1234",
+    "expected": "Suite number should be '127' and phone should be '894-3212'"
+  },
+  {
+    "input": "Williams Bob 789 Pine Rd Ste 305555-1234",
+    "expected": "Suite number should be '30' and phone should be '555-5123'"
+  },
+  {
+    "input": "Brown Alice 321 Elm St Floor 2467890-1234",
+    "expected": "Suite number should be '24' and phone should be '678-9012'"
+  },
+  {
+    "input": "Davis Tom 654 Maple Dr #567892-3456",
+    "expected": "Suite number should be '5' and phone should be '678-9234'"
+  },
+  {
+    "input": "Miller Susan 987 Cedar Ln Room 89012345-6789",
+    "expected": "Suite number should be '890' and phone should be '123-4567'"
+  },
+  {
+    "input": "Wilson James 246 Birch Way Bldg 3456789-0123",
+    "expected": "Suite number should be '34' and phone should be '567-8901'"
+  },
+  {
+    "input": "Martinez Carlos 135 Willow Path Tower 1234567-8901",
+    "expected": "Suite number should be '12' and phone should be '345-6789'"
+  },
+  {
+    "input": "Anderson Jennifer 579 Aspen Ct Level 678901-2345",
+    "expected": "Suite number should be '6' and phone should be '789-0123'"
+  },
+  {
+    "input": "Taylor Michael 864 Spruce Ave 234-5678",
+    "expected": "No suite number, phone should be '234-5678'"
+  },
+  {
+    "input": "Thomas Sarah 975 Fir St 345-6789",
+    "expected": "No suite number, phone should be '345-6789'"
+  }
+]

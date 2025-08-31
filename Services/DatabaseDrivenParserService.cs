@@ -1761,33 +1761,100 @@ public class DatabaseDrivenParserService : IStringParserService
             }
         }
         
-        // Try area code pattern first, but check if it's actually a road number
+        // FIRST: Check for suite indicators BEFORE trying phone patterns
+        // This prevents suite numbers from being mistaken for area codes
+        var words = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var suiteIndicators = await _referenceDataService.GetSuiteIndicatorsAsync();
+        
+        // Look for suite indicators in the input
+        bool hasSuiteIndicator = false;
+        int suiteIndicatorIndex = -1;
+        for (int i = 0; i < words.Length; i++)
+        {
+            var word = words[i].ToLower().TrimEnd('.', ',');
+            if (suiteIndicators.Contains(word))
+            {
+                hasSuiteIndicator = true;
+                suiteIndicatorIndex = i;
+                _logger.LogInformation($"Found suite indicator '{word}' at position {i}");
+                break;
+            }
+        }
+        
+        // Special handling when we have a suite indicator
+        if (hasSuiteIndicator && suiteIndicatorIndex < words.Length - 1)
+        {
+            // Check if there's a pattern like "Suite 209857-5732" or "Suite 209 857-5732"
+            // The number after the suite indicator might be concatenated with the phone
+            var afterSuite = string.Join(" ", words.Skip(suiteIndicatorIndex + 1));
+            
+            // Pattern for suite number directly attached to phone: Suite NNNNNN-NNNN
+            var suitePhonePattern = new Regex(@"^(\d{3,6})(\d{3}-\d{4})$");
+            var match = suitePhonePattern.Match(afterSuite.Replace(" ", ""));
+            
+            if (match.Success)
+            {
+                // Split the concatenated number
+                var suiteNum = match.Groups[1].Value;
+                var phoneNum = match.Groups[2].Value;
+                
+                _logger.LogInformation($"Detected suite number '{suiteNum}' concatenated with phone '{phoneNum}'");
+                
+                result.Phone = NormalizePhoneNumber(phoneNum, defaultAreaCode);
+                result.RemainingText = string.Join(" ", words.Take(suiteIndicatorIndex + 1)) + " " + suiteNum;
+                result.Success = true;
+                return result;
+            }
+            
+            // Pattern for suite number with space before phone
+            var nextWord = words[suiteIndicatorIndex + 1];
+            if (Regex.IsMatch(nextWord, @"^\d+$"))
+            {
+                // Suite number is separate from phone
+                var phoneStartIndex = suiteIndicatorIndex + 2;
+                if (phoneStartIndex < words.Length)
+                {
+                    var remainingAfterSuite = string.Join(" ", words.Skip(phoneStartIndex));
+                    var phoneMatchAfterSuite = Regex.Match(remainingAfterSuite, @"(\d{3}[\s-]?\d{4})");
+                    if (phoneMatchAfterSuite.Success)
+                    {
+                        _logger.LogInformation($"Detected suite number '{nextWord}' with phone '{phoneMatchAfterSuite.Value}'");
+                        result.Phone = NormalizePhoneNumber(phoneMatchAfterSuite.Value, defaultAreaCode);
+                        result.RemainingText = string.Join(" ", words.Take(phoneStartIndex));
+                        result.Success = true;
+                        return result;
+                    }
+                }
+            }
+        }
+        
+        // Try area code pattern, but check if it's actually a road number
         var areaCodeMatch = _areaCodePhonePattern.Match(input);
         if (areaCodeMatch.Success)
         {
             _logger.LogInformation($"Area code pattern matched: '{areaCodeMatch.Value}' at position {areaCodeMatch.Index}");
             
-            // Before accepting this as an area code, check if the 3-digit number 
-            // is preceded by a road type indicator
+            // Before accepting this as an area code, check if the number 
+            // is preceded by a road type indicator or suite indicator
             var beforeMatch = input.Substring(0, areaCodeMatch.Index).Trim();
-            var words = beforeMatch.Split(' ');
+            var wordsBeforeArea = beforeMatch.Split(' ');
             
-            _logger.LogInformation($"Before match: '{beforeMatch}', Words count: {words.Length}");
+            _logger.LogInformation($"Before match: '{beforeMatch}', Words count: {wordsBeforeArea.Length}");
             
-            if (words.Length > 0)
+            if (wordsBeforeArea.Length > 0)
             {
-                var lastWord = words[^1].ToLower().TrimEnd('.', ',');
-                _logger.LogInformation($"Last word before area code: '{lastWord}'");
+                var lastWord = wordsBeforeArea[^1].ToLower().TrimEnd('.', ',');
+                _logger.LogInformation($"Last word before potential area code: '{lastWord}'");
                 
-                // Road types that are followed by numbers (like Highway 205, Route 101)
-                // Get road indicators from database
+                // Get indicators from database
                 var roadIndicators = await _referenceDataService.GetRoadIndicatorsAsync();
+                var suiteIndicatorsArea = await _referenceDataService.GetSuiteIndicatorsAsync();
                 
+                // Check if it's a road indicator
                 if (roadIndicators.Contains(lastWord))
                 {
                     // This is a road number, not an area code
-                    // Just use the phone part without the road number
-                    _logger.LogInformation($"Detected road indicator '{lastWord}' before 3-digit number, not treating as area code");
+                    _logger.LogInformation($"Detected road indicator '{lastWord}' before number, not treating as area code");
                     
                     // Extract just the phone number (second part of the match)
                     var phoneOnly = areaCodeMatch.Groups[2].Value.Trim();
@@ -1796,16 +1863,54 @@ public class DatabaseDrivenParserService : IStringParserService
                     result.Success = true;
                     return result;
                 }
-                else
+                // Check if it's a suite indicator
+                else if (suiteIndicatorsArea.Contains(lastWord))
                 {
-                    // It's an area code
-                    _logger.LogInformation($"Accepting as area code: '{areaCodeMatch.Value}'");
-                    var areaCode = areaCodeMatch.Groups[1].Value;
-                    var localNumber = areaCodeMatch.Groups[2].Value;
-                    result.Phone = NormalizePhoneNumber(areaCode + localNumber);
-                    result.RemainingText = beforeMatch;
+                    // This is a suite number, not an area code
+                    _logger.LogInformation($"Detected suite indicator '{lastWord}' before number, not treating as area code");
+                    
+                    // Extract just the phone number (second part of the match)
+                    var phoneOnly = areaCodeMatch.Groups[2].Value.Trim();
+                    result.Phone = NormalizePhoneNumber(phoneOnly, defaultAreaCode);
+                    result.RemainingText = input.Substring(0, areaCodeMatch.Index).Trim() + " " + areaCodeMatch.Groups[1].Value;
                     result.Success = true;
                     return result;
+                }
+                // Also check for suite indicators within the last few words
+                else
+                {
+                    var suiteFound = false;
+                    for (int i = Math.Max(0, wordsBeforeArea.Length - 4); i < wordsBeforeArea.Length; i++)
+                    {
+                        var word = wordsBeforeArea[i].ToLower().TrimEnd('.', ',');
+                        if (suiteIndicatorsArea.Contains(word))
+                        {
+                            suiteFound = true;
+                            _logger.LogInformation($"Found suite indicator '{word}' near potential area code, treating as suite number");
+                            break;
+                        }
+                    }
+                    
+                    if (suiteFound)
+                    {
+                        // The first part is a suite number, not an area code
+                        var phoneOnly = areaCodeMatch.Groups[2].Value.Trim();
+                        result.Phone = NormalizePhoneNumber(phoneOnly, defaultAreaCode);
+                        result.RemainingText = input.Substring(0, areaCodeMatch.Index).Trim() + " " + areaCodeMatch.Groups[1].Value;
+                        result.Success = true;
+                        return result;
+                    }
+                    else
+                    {
+                        // No suite or road indicator, treat as area code
+                        _logger.LogInformation($"Accepting as area code: '{areaCodeMatch.Value}'");
+                        var areaCode = areaCodeMatch.Groups[1].Value;
+                        var localNumber = areaCodeMatch.Groups[2].Value;
+                        result.Phone = NormalizePhoneNumber(areaCode + localNumber);
+                        result.RemainingText = beforeMatch;
+                        result.Success = true;
+                        return result;
+                    }
                 }
             }
             else
@@ -1828,47 +1933,109 @@ public class DatabaseDrivenParserService : IStringParserService
             var remaining = input.Substring(0, phoneMatch.Index).Trim();
             
             // Check for area code or suite/unit number before phone
-            var words = remaining.Split(' ');
-            if (words.Length > 0)
+            var wordsRemaining = remaining.Split(' ');
+            if (wordsRemaining.Length > 0)
             {
-                var lastWord = words[^1];
+                var lastWord = wordsRemaining[^1];
                 
-                // Check if last word is a 3-digit number that could be area code or suite
-                if (Regex.IsMatch(lastWord, @"^\d{3}$"))
+                // Check if last word is a number that could be area code or suite
+                // This could be 3 digits (typical area code) or more (suite number)
+                if (Regex.IsMatch(lastWord, @"^\d+$"))
                 {
+                    var digitCount = lastWord.Length;
+                    
                     // Check if word before the number indicates it's a suite/unit
-                    if (words.Length > 1)
+                    // This is especially important for numbers that aren't exactly 3 digits
+                    if (wordsRemaining.Length > 1)
                     {
-                        var prevWord = words[^2].ToLower().TrimEnd('.', ',');
-                        // Suite indicators and road types that are followed by numbers
-                        // The number stays with the address, not the phone
+                        var prevWord = wordsRemaining[^2].ToLower().TrimEnd('.', ',');
+                        
                         // Get suite indicators and road indicators from database
-                        var suiteIndicators = await _referenceDataService.GetSuiteIndicatorsAsync();
+                        var suiteIndicatorsPhone = await _referenceDataService.GetSuiteIndicatorsAsync();
                         var roadIndicators = await _referenceDataService.GetRoadIndicatorsAsync();
                         
-                        // Combine them for this check
-                        var allIndicators = new HashSet<string>(suiteIndicators.Union(roadIndicators), StringComparer.OrdinalIgnoreCase);
+                        _logger.LogDebug($"Checking if '{prevWord}' is a suite/road indicator (number: {lastWord}, digits: {digitCount})");
                         
-                        _logger.LogDebug($"Checking if '{prevWord}' is a suite/road indicator (3-digit number: {lastWord})");
-                        
-                        if (allIndicators.Contains(prevWord))
+                        // Check for suite indicators (Suite, Apt, Unit, etc.)
+                        if (suiteIndicatorsPhone.Contains(prevWord))
                         {
-                            // This is a suite/unit number, not an area code
+                            // This is definitely a suite/unit number, not part of the phone
+                            _logger.LogDebug($"Found suite indicator '{prevWord}' - treating {lastWord} as suite number");
                             result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
                             result.RemainingText = remaining;
                         }
-                        else
+                        // Check for road indicators (Highway, Route, etc.)
+                        else if (roadIndicators.Contains(prevWord))
+                        {
+                            // This is a road number, not part of the phone
+                            _logger.LogDebug($"Found road indicator '{prevWord}' - treating {lastWord} as road number");
+                            result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
+                            result.RemainingText = remaining;
+                        }
+                        // Special handling for multi-digit numbers after suite indicators
+                        // Example: "Suite 209857-5732" where 2098 is the suite and 57-5732 is the phone
+                        else if (digitCount > 3)
+                        {
+                            // Check if any suite indicator appears within the last few words
+                            var suiteFound = false;
+                            for (int i = Math.Max(0, wordsRemaining.Length - 4); i < wordsRemaining.Length - 1; i++)
+                            {
+                                var word = wordsRemaining[i].ToLower().TrimEnd('.', ',');
+                                if (suiteIndicatorsPhone.Contains(word))
+                                {
+                                    suiteFound = true;
+                                    _logger.LogDebug($"Found suite indicator '{word}' near end - treating {lastWord} as suite number");
+                                    break;
+                                }
+                            }
+                            
+                            if (suiteFound)
+                            {
+                                // The number is a suite number
+                                result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
+                                result.RemainingText = remaining;
+                            }
+                            else
+                            {
+                                // No suite indicator, treat as potential area code if 3 digits
+                                if (digitCount == 3)
+                                {
+                                    result.Phone = NormalizePhoneNumber(lastWord + phone);
+                                    result.RemainingText = string.Join(" ", wordsRemaining.Take(wordsRemaining.Length - 1));
+                                }
+                                else
+                                {
+                                    // Not 3 digits and no suite indicator, leave as is
+                                    result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
+                                    result.RemainingText = remaining;
+                                }
+                            }
+                        }
+                        // Standard 3-digit number without suite/road indicator
+                        else if (digitCount == 3)
                         {
                             // Likely an area code
                             result.Phone = NormalizePhoneNumber(lastWord + phone);
-                            result.RemainingText = string.Join(" ", words.Take(words.Length - 1));
+                            result.RemainingText = string.Join(" ", wordsRemaining.Take(wordsRemaining.Length - 1));
                         }
+                        else
+                        {
+                            // Not 3 digits, leave as is
+                            result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
+                            result.RemainingText = remaining;
+                        }
+                    }
+                    else if (digitCount == 3)
+                    {
+                        // Only one word before phone and it's 3 digits, assume it's area code
+                        result.Phone = NormalizePhoneNumber(lastWord + phone);
+                        result.RemainingText = string.Join(" ", wordsRemaining.Take(wordsRemaining.Length - 1));
                     }
                     else
                     {
-                        // Only one word before phone, assume it's area code
-                        result.Phone = NormalizePhoneNumber(lastWord + phone);
-                        result.RemainingText = string.Join(" ", words.Take(words.Length - 1));
+                        // Single number that's not 3 digits, leave as is
+                        result.Phone = NormalizePhoneNumber(phone, defaultAreaCode);
+                        result.RemainingText = remaining;
                     }
                 }
                 else
