@@ -129,13 +129,17 @@ public class ReferenceDataService : IReferenceDataService
         
         if (!_cache.TryGetValue<HashSet<string>>(cacheKey, out var indicators))
         {
-            // Get from street_type_mapping table (abbreviated forms)
-            var types = await _context.StreetTypeMappings
-                .SelectMany(s => new[] { s.Abbreviation, s.FullName })
+            // Get from street_type_mapping table - fetch data first, then process in memory
+            var mappings = await _context.StreetTypeMappings
                 .ToListAsync();
             
-            indicators = new HashSet<string>(types.Where(t => !string.IsNullOrEmpty(t)), 
-                StringComparer.OrdinalIgnoreCase);
+            // Now process in memory to combine abbreviations and full names
+            var types = mappings
+                .SelectMany(s => new[] { s.Abbreviation, s.FullName })
+                .Where(t => !string.IsNullOrEmpty(t))
+                .ToList();
+            
+            indicators = new HashSet<string>(types, StringComparer.OrdinalIgnoreCase);
             
             _cache.Set(cacheKey, indicators, _cacheExpiration);
             _logger.LogDebug($"Loaded {indicators.Count} road indicators from database");

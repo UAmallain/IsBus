@@ -34,14 +34,38 @@ public class ContextClassificationService : IClassificationService
             };
         }
         
+        // Special debug logging for problem records
+        bool enableDebug = IsDebugRecord(input);
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\n{new string('=', 80)}");
+            _logger.LogWarning($"DEBUG CLASSIFICATION START: {input}");
+            _logger.LogWarning($"{new string('=', 80)}");
+        }
+        
         var normalizedInput = input.Trim().ToLowerInvariant();
         var words = normalizedInput.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        
+        if (enableDebug)
+        {
+            _logger.LogWarning($"DEBUG: Input split into {words.Length} words: [{string.Join(", ", words.Select(w => $"'{w}'"))}]");
+        }
         
         // Check for corporate suffixes using BusinessWordService
         foreach (var word in words)
         {
-            if (await _businessWordService.IsCorporateSuffixAsync(word.Trim('.')))
+            var cleanWord = word.Trim('.');
+            if (enableDebug)
             {
+                _logger.LogWarning($"DEBUG: Checking if '{cleanWord}' is a corporate suffix...");
+            }
+            
+            if (await _businessWordService.IsCorporateSuffixAsync(cleanWord))
+            {
+                if (enableDebug)
+                {
+                    _logger.LogWarning($"DEBUG: YES - '{cleanWord}' IS a corporate suffix! Classifying as BUSINESS with 100% confidence");
+                }
                 return new ClassificationResult
                 {
                     Input = input,
@@ -54,40 +78,65 @@ public class ContextClassificationService : IClassificationService
                     ResidentialScore = 0
                 };
             }
-        }
-        
-        // Special debug logging for problem records
-        bool enableDebug = IsDebugRecord(input);
-        if (enableDebug)
-        {
-            _logger.LogInformation($"\n{new string('=', 80)}\nDEBUG CLASSIFICATION START: {input}\n{new string('=', 80)}");
+            
+            if (enableDebug)
+            {
+                _logger.LogWarning($"DEBUG: '{cleanWord}' is NOT a corporate suffix");
+            }
         }
         
         // Build context map
-        var contextMap = await BuildContextMap(words);
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\nDEBUG: Building context map for each word...");
+        }
+        
+        var contextMap = await BuildContextMap(words, enableDebug);
         
         if (enableDebug)
         {
-            _logger.LogInformation($"WORD CONTEXT MAP for '{input}':");
+            _logger.LogWarning($"\nDEBUG WORD CONTEXT MAP SUMMARY:");
+            _logger.LogWarning($"Total words analyzed: {contextMap.Count}");
             foreach (var ctx in contextMap)
             {
-                _logger.LogInformation($"  Word: '{ctx.Word}' -> Type: {ctx.PrimaryType}, " +
-                    $"Counts: First={ctx.FirstCount}, Last={ctx.LastCount}, Both={ctx.BothCount}, Business={ctx.BusinessCount}");
+                _logger.LogWarning($"  Word: '{ctx.Word}' -> Primary Type: {ctx.PrimaryType}");
+                _logger.LogWarning($"    Database counts: First={ctx.FirstCount}, Last={ctx.LastCount}, Both={ctx.BothCount}, Business={ctx.BusinessCount}, Indeterminate={ctx.IndeterminateCount}");
+                if (ctx.MaxCount > 0)
+                {
+                    _logger.LogWarning($"    Max count: {ctx.MaxCount} (from {ctx.PrimaryType} category)");
+                }
             }
         }
         
         // Analyze the context pattern
-        var classification = AnalyzeContextPattern(contextMap);
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\nDEBUG: Analyzing context pattern...");
+        }
+        
+        var classification = AnalyzeContextPattern(contextMap, enableDebug);
         
         if (enableDebug)
         {
-            _logger.LogInformation($"CLASSIFICATION RESULT for '{input}':");
-            _logger.LogInformation($"  Classification: {classification.Classification}");
-            _logger.LogInformation($"  Confidence: {classification.Confidence}%");
-            _logger.LogInformation($"  Business Score: {classification.BusinessScore}");
-            _logger.LogInformation($"  Residential Score: {classification.ResidentialScore}");
-            _logger.LogInformation($"  Reason: {classification.Reason}");
-            _logger.LogInformation($"{new string('=', 80)}");
+            _logger.LogWarning($"\nDEBUG FINAL CLASSIFICATION RESULT:");
+            _logger.LogWarning($"  Input: '{input}'");
+            _logger.LogWarning($"  Classification: {classification.Classification.ToUpper()}");
+            _logger.LogWarning($"  Confidence: {classification.Confidence}%");
+            _logger.LogWarning($"  Business Score: {classification.BusinessScore}");
+            _logger.LogWarning($"  Residential Score: {classification.ResidentialScore}");
+            _logger.LogWarning($"  IsBusiness: {classification.IsBusiness}");
+            _logger.LogWarning($"  IsResidential: {classification.IsResidential}");
+            _logger.LogWarning($"  Reason: {classification.Reason}");
+            
+            if (classification.DetailedScores != null && classification.DetailedScores.Any())
+            {
+                _logger.LogWarning($"\n  Detailed Score Breakdown:");
+                foreach (var score in classification.DetailedScores)
+                {
+                    _logger.LogWarning($"    {score.Key}: {score.Value}");
+                }
+            }
+            _logger.LogWarning($"{new string('=', 80)}\n");
         }
         
         classification.Input = input;
@@ -103,16 +152,27 @@ public class ContextClassificationService : IClassificationService
     {
         if (string.IsNullOrEmpty(input)) return false;
         
-        var debugStarts = new[] { 
-            "Adshade", "Adsett", "Adesina", "Adeoye", "Adebukola", 
-            "Addington", "Adao", "Adams", "Adair", "Ackman", 
-            "Abli", "Aberathna", "Abdelhadi" 
+        // Debug records from the user's test
+        var debugRecords = new[] { 
+            "Aguayo Jesus",
+            "Albert Luc",
+            "Allain Arthur",
+            "Allain Bernard",
+            "Allain C",
+            "Allain D",
+            "Allain E",
+            "Allain Eric",
+            "Allain Gerald",
+            "Allain Gisele",
+            "Allain Herve",
+            "Allain Jacques"
         };
         
-        return debugStarts.Any(s => input.StartsWith(s, StringComparison.OrdinalIgnoreCase));
+        // Check if input starts with any debug record (case insensitive)
+        return debugRecords.Any(record => input.StartsWith(record, StringComparison.OrdinalIgnoreCase));
     }
     
-    private async Task<List<WordContext>> BuildContextMap(string[] words)
+    private async Task<List<WordContext>> BuildContextMap(string[] words, bool enableDebug = false)
     {
         var contextMap = new List<WordContext>();
         
@@ -132,7 +192,10 @@ public class ContextClassificationService : IClassificationService
             {
                 context.PrimaryType = WordTypeEnum.Connector;
                 contextMap.Add(context);
-                _logger.LogDebug($"{wordLower} identified as connector");
+                if (enableDebug)
+                {
+                    _logger.LogWarning($"  DEBUG: '{wordLower}' identified as CONNECTOR (special case)");
+                }
                 continue;
             }
             
@@ -141,11 +204,19 @@ public class ContextClassificationService : IClassificationService
             {
                 context.PrimaryType = WordTypeEnum.Initial;
                 contextMap.Add(context);
-                _logger.LogDebug($"{wordLower} identified as initial");
+                if (enableDebug)
+                {
+                    _logger.LogWarning($"  DEBUG: '{wordLower}' identified as INITIAL (single letter)");
+                }
                 continue;
             }
             
             // Get all word_data entries for this word
+            if (enableDebug)
+            {
+                _logger.LogWarning($"  DEBUG: Looking up '{wordLower}' in database...");
+            }
+            
             var wordEntries = await _context.Set<WordData>()
                 .Where(w => w.WordLower == wordLower)
                 .ToListAsync();
@@ -158,23 +229,51 @@ public class ContextClassificationService : IClassificationService
                 context.BusinessCount = wordEntries.FirstOrDefault(w => w.WordType == "business")?.WordCount ?? 0;
                 context.IndeterminateCount = wordEntries.FirstOrDefault(w => w.WordType == "indeterminate")?.WordCount ?? 0;
                 
+                if (enableDebug)
+                {
+                    _logger.LogWarning($"    Found in database with counts:");
+                    _logger.LogWarning($"      First: {context.FirstCount}");
+                    _logger.LogWarning($"      Last: {context.LastCount}");
+                    _logger.LogWarning($"      Both: {context.BothCount}");
+                    _logger.LogWarning($"      Business: {context.BusinessCount}");
+                    _logger.LogWarning($"      Indeterminate: {context.IndeterminateCount}");
+                }
+                
                 // Determine primary type based on highest count
-                context.PrimaryType = DeterminePrimaryType(context);
+                context.PrimaryType = DeterminePrimaryType(context, enableDebug);
                 context.MaxCount = Math.Max(
                     Math.Max(context.FirstCount, context.LastCount),
                     Math.Max(context.BothCount, context.BusinessCount)
                 );
+                
+                if (enableDebug)
+                {
+                    _logger.LogWarning($"    Primary type determined: {context.PrimaryType} (max count: {context.MaxCount})");
+                }
             }
             else
             {
+                if (enableDebug)
+                {
+                    _logger.LogWarning($"    NOT found in database");
+                }
+                
                 // Word not in database - check if it's a common determiner
                 if (IsCommonDeterminer(wordLower))
                 {
                     context.PrimaryType = WordTypeEnum.Indeterminate;
+                    if (enableDebug)
+                    {
+                        _logger.LogWarning($"    Identified as common determiner -> INDETERMINATE");
+                    }
                 }
                 else
                 {
                     context.PrimaryType = WordTypeEnum.Unknown;
+                    if (enableDebug)
+                    {
+                        _logger.LogWarning($"    Not a common determiner -> UNKNOWN");
+                    }
                 }
             }
             
@@ -205,7 +304,7 @@ public class ContextClassificationService : IClassificationService
         return word == "&" || word == "and" || word == "or";
     }
     
-    private WordTypeEnum DeterminePrimaryType(WordContext context)
+    private WordTypeEnum DeterminePrimaryType(WordContext context, bool enableDebug = false)
     {
         // The word type with the HIGHEST count determines the primary type
         // This is the key to using our learned data effectively
@@ -221,9 +320,18 @@ public class ContextClassificationService : IClassificationService
         // Find the type with the highest count
         var maxEntry = counts.OrderByDescending(kvp => kvp.Value).First();
         
+        if (enableDebug)
+        {
+            _logger.LogWarning($"      Highest count: {maxEntry.Key} with {maxEntry.Value}");
+        }
+        
         // If all counts are very low (< 3), consider it indeterminate/unknown
         if (maxEntry.Value < 3)
         {
+            if (enableDebug)
+            {
+                _logger.LogWarning($"      All counts < 3, returning INDETERMINATE");
+            }
             return WordTypeEnum.Indeterminate;
         }
         
@@ -232,19 +340,34 @@ public class ContextClassificationService : IClassificationService
         var maxNameCount = Math.Max(Math.Max(context.FirstCount, context.LastCount), context.BothCount);
         if (maxNameCount > context.BusinessCount * 2 && maxEntry.Key == WordTypeEnum.Business)
         {
+            if (enableDebug)
+            {
+                _logger.LogWarning($"      Name count ({maxNameCount}) is > 2x business count ({context.BusinessCount})");
+                _logger.LogWarning($"      Overriding business classification");
+            }
+            
             // Return the highest name type instead
             if (context.BothCount >= context.FirstCount && context.BothCount >= context.LastCount)
+            {
+                if (enableDebug) _logger.LogWarning($"      Returning BOTH instead");
                 return WordTypeEnum.Both;
+            }
             else if (context.LastCount >= context.FirstCount)
+            {
+                if (enableDebug) _logger.LogWarning($"      Returning LAST instead");
                 return WordTypeEnum.Last;
+            }
             else
+            {
+                if (enableDebug) _logger.LogWarning($"      Returning FIRST instead");
                 return WordTypeEnum.First;
+            }
         }
         
         return maxEntry.Key;
     }
     
-    private ClassificationResult AnalyzeContextPattern(List<WordContext> contextMap)
+    private ClassificationResult AnalyzeContextPattern(List<WordContext> contextMap, bool enableDebug = false)
     {
         var result = new ClassificationResult();
         
@@ -268,17 +391,61 @@ public class ContextClassificationService : IClassificationService
         int indeterminateWords = typeCount[WordTypeEnum.Indeterminate];
         int unknownWords = typeCount[WordTypeEnum.Unknown];
         
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\n  Word type counts:");
+            _logger.LogWarning($"    Business words: {businessWords}");
+            _logger.LogWarning($"    Name words: {nameWords} (First: {typeCount[WordTypeEnum.First]}, Last: {typeCount[WordTypeEnum.Last]}, Both: {typeCount[WordTypeEnum.Both]})");
+            _logger.LogWarning($"    Initial words: {initialWords}");
+            _logger.LogWarning($"    Connector words: {connectorWords}");
+            _logger.LogWarning($"    Indeterminate words: {indeterminateWords}");
+            _logger.LogWarning($"    Unknown words: {unknownWords}");
+        }
+        
         // Pattern analysis
-        var patterns = AnalyzePatterns(contextMap);
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\n  Analyzing patterns...");
+        }
+        var patterns = AnalyzePatterns(contextMap, enableDebug);
         
         // Calculate scores
         double businessScore = 0;
         double residentialScore = 0;
         
-        // Business indicators
-        businessScore += businessWords * 30;
-        businessScore += patterns.HasBusinessPattern ? 40 : 0;
-        businessScore += patterns.HasPossessiveWithBusiness ? 50 : 0;
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\n  Calculating scores...");
+        }
+        
+        // Business indicators - reduced weight for single business words
+        // Don't let a single business word dominate when we have name words
+        if (businessWords == 1 && nameWords >= 1)
+        {
+            // Single business word with name words - reduce weight significantly
+            businessScore += 10;
+            if (enableDebug) _logger.LogWarning($"    Business: +10 for single business word (reduced due to name words present)");
+        }
+        else
+        {
+            businessScore += businessWords * 30;
+            if (enableDebug && businessWords > 0)
+            {
+                _logger.LogWarning($"    Business: +{businessWords * 30} for {businessWords} business words");
+            }
+        }
+        
+        if (patterns.HasBusinessPattern)
+        {
+            businessScore += 40;
+            if (enableDebug) _logger.LogWarning($"    Business: +40 for business pattern");
+        }
+        
+        if (patterns.HasPossessiveWithBusiness)
+        {
+            businessScore += 50;
+            if (enableDebug) _logger.LogWarning($"    Business: +50 for possessive with business");
+        }
         
         // Initials followed by business words is a strong business indicator
         // BUT: Don't apply this if we have unknown words that could be names
@@ -308,24 +475,83 @@ public class ContextClassificationService : IClassificationService
         }
         
         // Residential indicators
-        residentialScore += patterns.HasValidNamePattern ? 60 : -20;
-        residentialScore += patterns.HasFirstLastPattern ? 40 : 0;
-        residentialScore += patterns.HasInitialPattern ? 50 : 0;  // Strong indicator of residential
-        residentialScore += nameWords * 15;
+        if (patterns.HasValidNamePattern)
+        {
+            residentialScore += 60;
+            if (enableDebug) _logger.LogWarning($"    Residential: +60 for valid name pattern");
+        }
+        else if (contextMap.Count == 2)
+        {
+            // Special handling for two-word entries
+            // Many residential names are "LastName FirstName" or "FirstName LastName"
+            // If we have one name word and one business word, lean toward residential
+            if (nameWords == 1 && businessWords == 1)
+            {
+                residentialScore += 20;
+                if (enableDebug) _logger.LogWarning($"    Residential: +20 for two-word pattern with one name");
+            }
+            else
+            {
+                residentialScore -= 20;
+                if (enableDebug) _logger.LogWarning($"    Residential: -20 for no valid name pattern");
+            }
+        }
+        else
+        {
+            residentialScore -= 20;
+            if (enableDebug) _logger.LogWarning($"    Residential: -20 for no valid name pattern");
+        }
+        
+        if (patterns.HasFirstLastPattern)
+        {
+            residentialScore += 40;
+            if (enableDebug) _logger.LogWarning($"    Residential: +40 for first+last pattern");
+        }
+        
+        if (patterns.HasInitialPattern)
+        {
+            residentialScore += 50;
+            if (enableDebug) _logger.LogWarning($"    Residential: +50 for initial pattern ({patterns.InitialPatternType})");
+        }
+        
+        if (nameWords > 0)
+        {
+            residentialScore += nameWords * 15;
+            if (enableDebug) _logger.LogWarning($"    Residential: +{nameWords * 15} for {nameWords} name words");
+        }
         
         // Single word penalty for residential
         if (contextMap.Count == 1)
         {
             businessScore += 50;
             residentialScore -= 30;
+            if (enableDebug)
+            {
+                _logger.LogWarning($"    Business: +50 for single word");
+                _logger.LogWarning($"    Residential: -30 for single word");
+            }
         }
         
         // Normalize scores
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\n  Raw scores before normalization:");
+            _logger.LogWarning($"    Business: {businessScore}");
+            _logger.LogWarning($"    Residential: {residentialScore}");
+        }
+        
         var total = businessScore + residentialScore;
         if (total > 0)
         {
             businessScore = (businessScore / total) * 100;
             residentialScore = (residentialScore / total) * 100;
+        }
+        
+        if (enableDebug)
+        {
+            _logger.LogWarning($"\n  Normalized scores:");
+            _logger.LogWarning($"    Business: {businessScore:F1}%");
+            _logger.LogWarning($"    Residential: {residentialScore:F1}%");
         }
         
         // Special handling for entries with mostly unknown words
@@ -401,7 +627,7 @@ public class ContextClassificationService : IClassificationService
         return result;
     }
     
-    private PatternAnalysis AnalyzePatterns(List<WordContext> contextMap)
+    private PatternAnalysis AnalyzePatterns(List<WordContext> contextMap, bool enableDebug = false)
     {
         var analysis = new PatternAnalysis();
         
@@ -409,12 +635,16 @@ public class ContextClassificationService : IClassificationService
             return analysis;
         
         // Check for initial patterns first
-        analysis = CheckForInitialPatterns(contextMap, analysis);
+        analysis = CheckForInitialPatterns(contextMap, analysis, enableDebug);
         
         // If we found an initial pattern, it's likely residential
         if (analysis.HasInitialPattern)
         {
             analysis.HasValidNamePattern = true;
+            if (enableDebug)
+            {
+                _logger.LogWarning($"    Pattern: Has initial pattern ({analysis.InitialPatternType}) - marking as valid name pattern");
+            }
             return analysis; // Early return for clear residential patterns
         }
         
@@ -524,7 +754,7 @@ public class ContextClassificationService : IClassificationService
         return determiners.Contains(word);
     }
     
-    private PatternAnalysis CheckForInitialPatterns(List<WordContext> contextMap, PatternAnalysis analysis)
+    private PatternAnalysis CheckForInitialPatterns(List<WordContext> contextMap, PatternAnalysis analysis, bool enableDebug = false)
     {
         // Pattern: Name Initial [Connector Initial]*
         // Examples: "Smith J", "Smith J & M", "Smith J M", "J Smith", "J & M Smith"

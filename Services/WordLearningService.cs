@@ -37,7 +37,7 @@ public class WordLearningService : IWordLearningService
         _logger = logger;
     }
     
-    public async Task<int> LearnFromParseResultAsync(ParseResult parseResult, int minimumConfidence = 85)
+    public async Task<int> LearnFromParseResultAsync(ParseResult parseResult, int minimumConfidence = 95)
     {
         if (parseResult == null || !parseResult.Success)
         {
@@ -58,6 +58,18 @@ public class WordLearningService : IWordLearningService
         {
             _logger.LogInformation($"Skipping learning - unclear classification (neither business nor residential) for: {parseResult.Input}");
             return 0;
+        }
+        
+        // Don't learn from two-word entries where classification might be ambiguous
+        // These often have one name word and one business word, making them unreliable for learning
+        if (!string.IsNullOrWhiteSpace(parseResult.Name))
+        {
+            var words = parseResult.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (words.Length == 2 && parseResult.IsBusinessName && string.IsNullOrWhiteSpace(parseResult.FirstName) && string.IsNullOrWhiteSpace(parseResult.LastName))
+            {
+                _logger.LogInformation($"Skipping learning - two-word business name might be residential: {parseResult.Input}");
+                return 0;
+            }
         }
             
         _logger.LogInformation($"Learning from parse result (confidence: {nameConfidence}%): Input='{parseResult.Input}', IsRes={parseResult.IsResidentialName}, IsBus={parseResult.IsBusinessName}, FirstName='{parseResult.FirstName}', LastName='{parseResult.LastName}'");

@@ -953,6 +953,15 @@ public class DatabaseDrivenParserService : IStringParserService
                     if (isDebugRecord)
                     {
                         _logger.LogWarning($"DEBUG: Classification result - IsBusiness: {classification.IsBusiness}, IsResidential: {classification.IsResidential}, Confidence: {classification.Confidence}");
+                        _logger.LogWarning($"DEBUG: Classification reason: {classification.Reason}");
+                        if (classification.DetailedScores != null && classification.DetailedScores.Any())
+                        {
+                            _logger.LogWarning($"DEBUG: Detailed scores:");
+                            foreach (var score in classification.DetailedScores)
+                            {
+                                _logger.LogWarning($"  {score.Key}: {score.Value}");
+                            }
+                        }
                     }
                     
                     // Split residential names into LastName and FirstName

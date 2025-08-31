@@ -170,12 +170,79 @@ public class BusinessWordService : IBusinessWordService
         if (string.IsNullOrEmpty(phrase)) return false;
         
         var debugStarts = new[] { 
-            "Adshade", "Adsett", "Adesina", "Adeoye", "Adebukola", 
-            "Addington", "Adao", "Adams", "Adair", "Ackman", 
-            "Abli", "Aberathna", "Abdelhadi" 
+            "Aguayo Jesus",
+            "Albert Luc",
+            "Allain Arthur",
+            "Allain Bernard",
+            "Allain C",
+            "Allain D",
+            "Allain E",
+            "Allain Eric",
+            "Allain Gerald",
+            "Allain Gisele",
+            "Allain Herve",
+            "Allain Jacques"
         };
         
         return debugStarts.Any(s => phrase.StartsWith(s, StringComparison.OrdinalIgnoreCase));
+    }
+    
+    private bool IsCardinalDirection(string word)
+    {
+        var directions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "north", "south", "east", "west",
+            "northeast", "northwest", "southeast", "southwest",
+            "n", "s", "e", "w", "ne", "nw", "se", "sw"
+        };
+        
+        return directions.Contains(word);
+    }
+    
+    private async Task<bool> IsCommunityNameAsync(string word)
+    {
+        // Check if this word exists in the communities table
+        var exists = await _context.Communities
+            .AnyAsync(c => c.CommunityName.ToLower() == word.ToLower());
+        
+        return exists;
+    }
+    
+    private async Task<(bool found, string communityName)> CheckForCommunityPhraseAsync(string phrase)
+    {
+        if (string.IsNullOrWhiteSpace(phrase))
+            return (false, string.Empty);
+        
+        // Get all communities from database
+        var communities = await _context.Communities
+            .Select(c => c.CommunityName)
+            .ToListAsync();
+        
+        // Check if the phrase contains any multi-word community names
+        foreach (var community in communities)
+        {
+            if (string.IsNullOrWhiteSpace(community))
+                continue;
+            
+            // Check for exact match or variations with hyphens
+            // "Grand - Barachois" should match "Grand-Barachois" or "Grand Barachois"
+            var normalizedCommunity = community.Replace("-", " ").Replace("  ", " ").Trim();
+            var normalizedPhrase = phrase.Replace("-", " ").Replace("  ", " ").Trim();
+            
+            if (normalizedPhrase.Contains(normalizedCommunity, StringComparison.OrdinalIgnoreCase))
+            {
+                return (true, community);
+            }
+            
+            // Also check with hyphens
+            var hyphenatedCommunity = community.Replace(" ", "-");
+            if (phrase.Contains(hyphenatedCommunity, StringComparison.OrdinalIgnoreCase))
+            {
+                return (true, community);
+            }
+        }
+        
+        return (false, string.Empty);
     }
     
     public async Task<Dictionary<string, BusinessIndicatorStrength>> AnalyzeWordsAsync(string[] words)
@@ -204,6 +271,20 @@ public class BusinessWordService : IBusinessWordService
         
         foreach (var word in cleanWords)
         {
+            // Skip cardinal directions - they're address words, not business indicators
+            if (IsCardinalDirection(word))
+            {
+                result[word] = BusinessIndicatorStrength.None;
+                continue;
+            }
+            
+            // Skip community names - they're location words, not business indicators
+            if (await IsCommunityNameAsync(word))
+            {
+                result[word] = BusinessIndicatorStrength.None;
+                continue;
+            }
+            
             // Check corporate suffix first
             if (_corporateSuffixes?.Contains(word) ?? false)
             {
@@ -286,18 +367,78 @@ public class BusinessWordService : IBusinessWordService
         bool enableDebug = IsDebugPhrase(phrase);
         if (enableDebug)
         {
-            _logger.LogInformation($"DEBUG BusinessWordService.AnalyzePhraseAsync: '{phrase}'");
+            _logger.LogWarning($"DEBUG BusinessWordService.AnalyzePhraseAsync: '{phrase}'");
         }
         
+        // First check if the phrase contains multi-word community names
+        // This needs to happen before splitting into individual words
+        var phraseContainsCommunity = await CheckForCommunityPhraseAsync(phrase);
+        
         var words = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var wordStrengths = await AnalyzeWordsAsync(words);
+        
+        // If the phrase contains a known community, filter those words out
+        Dictionary<string, BusinessIndicatorStrength> wordStrengths;
+        if (phraseContainsCommunity.found)
+        {
+            if (enableDebug)
+            {
+                _logger.LogWarning($"  Found community phrase: '{phraseContainsCommunity.communityName}'");
+                _logger.LogWarning($"  Filtering out community words from analysis");
+            }
+            
+            // Filter out the community words from analysis
+            var communityWords = phraseContainsCommunity.communityName
+                .Split(new[] { ' ', '-' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(w => w.ToLower())
+                .ToHashSet();
+            
+            var filteredWords = words
+                .Where(w => !communityWords.Contains(w.ToLower().Trim('.', ',', '\'', '"', '-')))
+                .ToArray();
+            
+            wordStrengths = await AnalyzeWordsAsync(filteredWords);
+        }
+        else
+        {
+            wordStrengths = await AnalyzeWordsAsync(words);
+        }
         
         if (enableDebug)
         {
-            _logger.LogInformation($"  Word strengths for '{phrase}':");
+            _logger.LogWarning($"  Input phrase: '{phrase}'");
+            _logger.LogWarning($"  Split into words: [{string.Join(", ", words.Select(w => $"'{w}'"))}]");
+            _logger.LogWarning($"  Word strengths analyzed ({wordStrengths.Count} unique words):");
             foreach (var kvp in wordStrengths)
             {
-                _logger.LogInformation($"    '{kvp.Key}': {kvp.Value}");
+                _logger.LogWarning($"    '{kvp.Key}': {kvp.Value}");
+                
+                // Get the actual database counts for debugging
+                var wordData = await _context.WordData
+                    .Where(w => w.WordLower == kvp.Key.ToLower())
+                    .ToListAsync();
+                
+                if (wordData.Any())
+                {
+                    foreach (var data in wordData)
+                    {
+                        _logger.LogWarning($"      Database: {data.WordType}={data.WordCount}");
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning($"      NOT IN DATABASE");
+                }
+            }
+            
+            // Show which words were not analyzed (duplicates)
+            var analyzedWords = wordStrengths.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var word in words)
+            {
+                var clean = word.ToLower().Trim('.', ',', '\'', '"');
+                if (!string.IsNullOrEmpty(clean) && !analyzedWords.Contains(clean))
+                {
+                    _logger.LogWarning($"    '{clean}': DUPLICATE (not analyzed)");
+                }
             }
         }
         
@@ -350,6 +491,14 @@ public class BusinessWordService : IBusinessWordService
         var strongWords = wordStrengths.Where(kvp => kvp.Value >= BusinessIndicatorStrength.Strong).ToList();
         var mediumWords = wordStrengths.Where(kvp => kvp.Value == BusinessIndicatorStrength.Medium).ToList();
         
+        if (enableDebug)
+        {
+            _logger.LogWarning($"  Analysis summary:");
+            _logger.LogWarning($"    Max strength: {maxStrength}");
+            _logger.LogWarning($"    Strong words ({strongWords.Count}): [{string.Join(", ", strongWords.Select(w => $"'{w.Key}'"))}]");
+            _logger.LogWarning($"    Medium words ({mediumWords.Count}): [{string.Join(", ", mediumWords.Select(w => $"'{w.Key}'"))}]");
+        }
+        
         // Decision logic - log decision for Abraham
         if (phrase.Contains("Abraham", StringComparison.OrdinalIgnoreCase))
         {
@@ -365,6 +514,10 @@ public class BusinessWordService : IBusinessWordService
         if (strongWords.Any())
         {
             var strongWord = strongWords.First().Key;
+            if (enableDebug)
+            {
+                _logger.LogWarning($"  DECISION: Classifying as BUSINESS because it contains strong business word: {strongWord}");
+            }
             return (true, maxStrength, $"Contains strong business word: {strongWord}");
         }
         
@@ -394,6 +547,10 @@ public class BusinessWordService : IBusinessWordService
             _logger.LogDebug($"Found {weakCount} weak business indicators in '{phrase}' - not enough for business classification");
         }
         
+        if (enableDebug)
+        {
+            _logger.LogWarning($"  DECISION: NOT classifying as business - no strong indicators found");
+        }
         return (false, maxStrength, "No strong business indicators found");
     }
 }
