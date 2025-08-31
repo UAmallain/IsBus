@@ -56,11 +56,39 @@ public class ContextClassificationService : IClassificationService
             }
         }
         
+        // Special debug logging for problem records
+        bool enableDebug = IsDebugRecord(input);
+        if (enableDebug)
+        {
+            _logger.LogInformation($"\n{new string('=', 80)}\nDEBUG CLASSIFICATION START: {input}\n{new string('=', 80)}");
+        }
+        
         // Build context map
         var contextMap = await BuildContextMap(words);
         
+        if (enableDebug)
+        {
+            _logger.LogInformation($"WORD CONTEXT MAP for '{input}':");
+            foreach (var ctx in contextMap)
+            {
+                _logger.LogInformation($"  Word: '{ctx.Word}' -> Type: {ctx.PrimaryType}, " +
+                    $"Counts: First={ctx.FirstCount}, Last={ctx.LastCount}, Both={ctx.BothCount}, Business={ctx.BusinessCount}");
+            }
+        }
+        
         // Analyze the context pattern
         var classification = AnalyzeContextPattern(contextMap);
+        
+        if (enableDebug)
+        {
+            _logger.LogInformation($"CLASSIFICATION RESULT for '{input}':");
+            _logger.LogInformation($"  Classification: {classification.Classification}");
+            _logger.LogInformation($"  Confidence: {classification.Confidence}%");
+            _logger.LogInformation($"  Business Score: {classification.BusinessScore}");
+            _logger.LogInformation($"  Residential Score: {classification.ResidentialScore}");
+            _logger.LogInformation($"  Reason: {classification.Reason}");
+            _logger.LogInformation($"{new string('=', 80)}");
+        }
         
         classification.Input = input;
         classification.Words = words.ToList();
@@ -69,6 +97,19 @@ public class ContextClassificationService : IClassificationService
         _logger.LogDebug($"Context Map: {string.Join(", ", contextMap.Select(c => c.PrimaryType))}");
         
         return classification;
+    }
+    
+    private bool IsDebugRecord(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return false;
+        
+        var debugStarts = new[] { 
+            "Adshade", "Adsett", "Adesina", "Adeoye", "Adebukola", 
+            "Addington", "Adao", "Adams", "Adair", "Ackman", 
+            "Abli", "Aberathna", "Abdelhadi" 
+        };
+        
+        return debugStarts.Any(s => input.StartsWith(s, StringComparison.OrdinalIgnoreCase));
     }
     
     private async Task<List<WordContext>> BuildContextMap(string[] words)
@@ -166,15 +207,9 @@ public class ContextClassificationService : IClassificationService
     
     private WordTypeEnum DeterminePrimaryType(WordContext context)
     {
-        // If business count is significantly higher (2x) than any name count, it's business
-        var maxNameCount = Math.Max(Math.Max(context.FirstCount, context.LastCount), context.BothCount);
+        // The word type with the HIGHEST count determines the primary type
+        // This is the key to using our learned data effectively
         
-        if (context.BusinessCount > maxNameCount * 2 && context.BusinessCount >= 10)
-        {
-            return WordTypeEnum.Business;
-        }
-        
-        // Find the highest count
         var counts = new Dictionary<WordTypeEnum, int>
         {
             { WordTypeEnum.First, context.FirstCount },
@@ -183,12 +218,27 @@ public class ContextClassificationService : IClassificationService
             { WordTypeEnum.Business, context.BusinessCount }
         };
         
+        // Find the type with the highest count
         var maxEntry = counts.OrderByDescending(kvp => kvp.Value).First();
         
-        // If the max count is very low (< 5), consider it indeterminate
-        if (maxEntry.Value < 5)
+        // If all counts are very low (< 3), consider it indeterminate/unknown
+        if (maxEntry.Value < 3)
         {
             return WordTypeEnum.Indeterminate;
+        }
+        
+        // Special case: If name counts (first/last/both) are significantly higher than business
+        // then it's definitely a name, not business
+        var maxNameCount = Math.Max(Math.Max(context.FirstCount, context.LastCount), context.BothCount);
+        if (maxNameCount > context.BusinessCount * 2 && maxEntry.Key == WordTypeEnum.Business)
+        {
+            // Return the highest name type instead
+            if (context.BothCount >= context.FirstCount && context.BothCount >= context.LastCount)
+                return WordTypeEnum.Both;
+            else if (context.LastCount >= context.FirstCount)
+                return WordTypeEnum.Last;
+            else
+                return WordTypeEnum.First;
         }
         
         return maxEntry.Key;
@@ -278,8 +328,45 @@ public class ContextClassificationService : IClassificationService
             residentialScore = (residentialScore / total) * 100;
         }
         
-        // Determine classification
-        if (businessScore > residentialScore)
+        // Special handling for entries with mostly unknown words
+        int totalWords = contextMap.Count;
+        
+        // If most words are unknown and we have no strong indicators
+        if (unknownWords >= totalWords / 2 && businessWords == 0 && nameWords <= 1)
+        {
+            // Count non-hyphenated words (split hyphenated words)
+            int effectiveWordCount = 0;
+            foreach (var context in contextMap)
+            {
+                if (context.Word.Contains('-'))
+                {
+                    effectiveWordCount += context.Word.Split('-').Length;
+                }
+                else
+                {
+                    effectiveWordCount++;
+                }
+            }
+            
+            // Default: 5 or fewer words = residential, more than 5 = business
+            // Use lowest confidence (50%) since we're guessing
+            if (effectiveWordCount <= 5)
+            {
+                result.Classification = "residential";
+                result.Confidence = 50;
+                result.IsResidential = true;
+                result.Reason = "Unknown words - defaulting to residential (5 or fewer words)";
+            }
+            else
+            {
+                result.Classification = "business";
+                result.Confidence = 50;
+                result.IsBusiness = true;
+                result.Reason = "Unknown words - defaulting to business (more than 5 words)";
+            }
+        }
+        // Otherwise use the normal scoring
+        else if (businessScore > residentialScore)
         {
             result.Classification = "business";
             result.Confidence = Math.Min(100, (int)businessScore);

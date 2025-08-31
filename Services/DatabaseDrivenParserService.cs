@@ -73,6 +73,9 @@ public class DatabaseDrivenParserService : IStringParserService
         input = input.Replace('_', ' '); // Replace underscores with spaces
         input = Regex.Replace(input.Trim(), @"\s+", " "); // Collapse multiple spaces to single space
         
+        // OCR Error Detection and Correction
+        input = await DetectAndCorrectOCRErrors(input, province);
+        
         // Step 1: Extract phone number
         var phoneExtraction = ExtractPhoneNumber(input, areaCode);
         if (!phoneExtraction.Success)
@@ -171,8 +174,69 @@ public class DatabaseDrivenParserService : IStringParserService
             }
         }
         
-        // Use BusinessWordService to analyze the phrase for business indicators
-        var businessAnalysis = await _businessWordService.AnalyzePhraseAsync(remainingText);
+        // CRITICAL: Extract the address FIRST, then analyze only the remaining name portion
+        // This ensures street types (Dr, Av, St) don't get misinterpreted as business indicators
+        string namePortionForAnalysis = remainingText;
+        string extractedAddress = "";
+        var wordsForAnalysis = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        
+        // Common street types that should not be analyzed as business indicators
+        var streetTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "St", "Street", "Ave", "Av", "Avenue", "Dr", "Drive", "Rd", "Road",
+            "Blvd", "Boulevard", "Ln", "Lane", "Ct", "Court", "Pl", "Place",
+            "Way", "Pkwy", "Parkway", "Terr", "Terrace", "Cir", "Circle",
+            "Sq", "Square", "Crescent", "Cres", "Highway", "Hwy", "Trail", "Tr"
+        };
+        
+        // Find where the address likely starts - look for patterns like:
+        // 1. Number followed by street name (e.g., "123 Main St")
+        // 2. Unit/Apt indicators (e.g., "A22", "#5")
+        // 3. Just a street name with type (e.g., "Mountain Rd")
+        int addressStartIndex = -1;
+        
+        for (int i = 0; i < wordsForAnalysis.Length; i++)
+        {
+            // Check if this word is a civic number or unit indicator
+            if (Regex.IsMatch(wordsForAnalysis[i], @"^[A-Z]?\d+[A-Z]?$|^#\d+$"))
+            {
+                addressStartIndex = i;
+                break;
+            }
+            
+            // Check if this word is a street type (even without a number)
+            if (i > 0 && streetTypes.Contains(wordsForAnalysis[i]))
+            {
+                // Check if the previous word could be a street name
+                // (not a common first/last name indicator)
+                addressStartIndex = i - 1;
+                break;
+            }
+        }
+        
+        // Extract the name and address portions
+        if (addressStartIndex > 0)
+        {
+            namePortionForAnalysis = string.Join(" ", wordsForAnalysis.Take(addressStartIndex));
+            extractedAddress = string.Join(" ", wordsForAnalysis.Skip(addressStartIndex));
+            _logger.LogDebug($"Extracted - Name: '{namePortionForAnalysis}', Address: '{extractedAddress}' from '{remainingText}'");
+        }
+        else if (addressStartIndex == 0)
+        {
+            // The entire string appears to be an address (starts with number)
+            // This is unusual for a phone book entry, treat with low confidence
+            namePortionForAnalysis = "";
+            extractedAddress = remainingText;
+            _logger.LogDebug($"Unusual pattern - entire string appears to be address: '{remainingText}'");
+        }
+        else
+        {
+            // No clear address pattern found - might be name only or phone only
+            _logger.LogDebug($"No clear address pattern found in: '{remainingText}'");
+        }
+        
+        // Use BusinessWordService to analyze ONLY the name portion for business indicators
+        var businessAnalysis = await _businessWordService.AnalyzePhraseAsync(namePortionForAnalysis);
         
         // Check if we have strong business indicators
         bool hasStrongBusinessWords = businessAnalysis.isBusiness && 
@@ -259,7 +323,7 @@ public class DatabaseDrivenParserService : IStringParserService
         if (isLikelyBusiness && !looksLikeResidentialWithInitials)
         {
             var words = remainingText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            int addressStartIndex = -1;
+            int businessAddressStartIndex = -1;
             
             // Look for clear business terminators that often precede addresses
             // Check for corporate suffixes that indicate addresses often come after these
@@ -406,7 +470,7 @@ public class DatabaseDrivenParserService : IStringParserService
                     if (looksLikeAddress)
                     {
                         _logger.LogInformation($"Number at position {i} looks like address start!");
-                        addressStartIndex = i;
+                        businessAddressStartIndex = i;
                         break;
                     }
                     else
@@ -417,18 +481,18 @@ public class DatabaseDrivenParserService : IStringParserService
                 // Check for unit indicators
                 else if (Regex.IsMatch(word, @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase))
                 {
-                    addressStartIndex = i;
+                    businessAddressStartIndex = i;
                     break;
                 }
             }
             
             // If we found an address, split the text
-            _logger.LogInformation($"Final addressStartIndex: {addressStartIndex}");
-            if (addressStartIndex >= 0)
+            _logger.LogInformation($"Final addressStartIndex: {businessAddressStartIndex}");
+            if (businessAddressStartIndex >= 0)
             {
                 // Calculate character position for the split
                 int charPos = 0;
-                for (int j = 0; j < addressStartIndex; j++)
+                for (int j = 0; j < businessAddressStartIndex; j++)
                 {
                     charPos += words[j].Length + 1;
                 }
@@ -505,39 +569,311 @@ public class DatabaseDrivenParserService : IStringParserService
             }
         }
         
-        // Special handling for residential patterns with initials
-        if (looksLikeResidentialWithInitials && wordsForCheck.Length == 3)
+        // Pattern detection helps us identify name boundaries, but doesn't determine classification
+        // We ALWAYS use word data to determine if something is business or residential
+        if (looksLikeResidentialWithInitials)
         {
-            // Treat all 3 words as the name
-            result.Name = remainingText;
-            result.Address = "";
-            result.Confidence.AddressConfidence = 0;
-            
-            // It's a residential name
-            result.IsBusinessName = false;
-            result.IsResidentialName = true;
-            result.Confidence.NameConfidence = 85; // High confidence for this specific pattern
-            
-            // Split the name properly based on the pattern
-            if (residentialInitialPattern == "initial-surname-initial")
+            // The pattern suggests where the name ends, but we'll verify with data
+            if (residentialInitialPattern == "initial-name" && wordsForCheck.Length >= 2)
             {
-                // For "A Mwinkeu C", we want: LastName = "Mwinkeu", FirstName = "A C"
-                result.LastName = wordsForCheck[1]; // Middle word is the surname
-                result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[2]}"; // First and last are initials
+                // First, we need to determine how much of the text is actually the name
+                // We'll check different possibilities and use word data to decide
+                if (wordsForCheck.Length >= 3)
+                {
+                    // Option 1: All words before the first number could be the name (e.g., "A Human Touch")
+                    // Option 2: Just the first 2 words (e.g., "A Lucille" from "A Lucille Dieppe")
+                    // Option 3: First 3 words if third is an initial (e.g., "A Mwinkeu C")
+                    
+                    // Let's check what the word data tells us about different combinations
+                    var twoWordName = string.Join(" ", wordsForCheck.Take(2));
+                    var threeWordName = string.Join(" ", wordsForCheck.Take(3));
+                    
+                    // Check if the 2-word version has strong business indicators
+                    var twoWordAnalysis = await _businessWordService.AnalyzePhraseAsync(twoWordName);
+                    
+                    // Check if the 3-word version has even stronger business indicators
+                    var threeWordAnalysis = await _businessWordService.AnalyzePhraseAsync(threeWordName);
+                    
+                    // If the 3-word version is strongly business, use that
+                    if (threeWordAnalysis.isBusiness && threeWordAnalysis.maxStrength >= BusinessIndicatorStrength.Strong)
+                    {
+                        // Use all 3 words as the name
+                        result.Name = threeWordName;
+                        
+                        // Extract remaining as address
+                        if (wordsForCheck.Length > 3)
+                        {
+                            var remainingAfterName = string.Join(" ", wordsForCheck.Skip(3));
+                            var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                            result.Address = addressParse.Address;
+                            result.Confidence.AddressConfidence = addressParse.AddressConfidence;
+                        }
+                        
+                        // Now classify using the full name
+                        var classification = await _classificationService.ClassifyAsync(result.Name);
+                        result.IsBusinessName = classification.IsBusiness;
+                        result.IsResidentialName = classification.IsResidential;
+                        result.Confidence.NameConfidence = classification.Confidence;
+                        
+                        result.Confidence.PhoneConfidence = 100;
+                        result.Success = true;
+                        
+                        _logger.LogInformation($"Used word data to determine 3-word name: '{result.Name}' classified as {(result.IsBusinessName ? "BUSINESS" : "RESIDENTIAL")}");
+                        return result;
+                    }
+                    else if (wordsForCheck[2].Length == 1 && char.IsLetter(wordsForCheck[2][0]))
+                    {
+                        // Pattern suggests initial-surname-initial: "A Mwinkeu C"
+                        result.Name = string.Join(" ", wordsForCheck.Take(3));
+                        
+                        // Extract address from remaining text
+                        if (wordsForCheck.Length > 3)
+                        {
+                            var remainingAfterName = string.Join(" ", wordsForCheck.Skip(3));
+                            var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                            result.Address = addressParse.Address;
+                            result.Confidence.AddressConfidence = addressParse.AddressConfidence;
+                        }
+                        else
+                        {
+                            result.Address = "";
+                            result.Confidence.AddressConfidence = 0;
+                        }
+                        
+                        // Use classification service to determine if business or residential
+                        var classification = await _classificationService.ClassifyAsync(result.Name);
+                        result.IsBusinessName = classification.IsBusiness;
+                        result.IsResidentialName = classification.IsResidential;
+                        result.Confidence.NameConfidence = classification.Confidence;
+                        
+                        // Only split into first/last if it's residential
+                        if (result.IsResidentialName)
+                        {
+                            result.LastName = wordsForCheck[1]; // Middle word is surname
+                            result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[2]}"; // First and last are initials
+                        }
+                        
+                        result.Confidence.PhoneConfidence = 100;
+                        result.Success = true;
+                        
+                        _logger.LogInformation($"Detected initial-surname-initial from initial-name pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+                        return result;
+                    }
+                    else
+                    {
+                        // Check if the next part is hyphenated (like "T Adesola - Adeoye")
+                        // Look for a dash in positions 2 or 3
+                        bool hasHyphen = false;
+                        int hyphenPos = -1;
+                        
+                        for (int i = 2; i < Math.Min(wordsForCheck.Length, 4); i++)
+                        {
+                            if (wordsForCheck[i] == "-" || wordsForCheck[i].Contains("-"))
+                            {
+                                hasHyphen = true;
+                                hyphenPos = i;
+                                break;
+                            }
+                        }
+                        
+                        if (hasHyphen && hyphenPos < wordsForCheck.Length - 1)
+                        {
+                            // Handle hyphenated name after initial: "T Adesola - Adeoye"
+                            // Reconstruct the hyphenated name
+                            var nameEndIndex = hyphenPos + 1; // Include word after hyphen
+                            if (wordsForCheck[hyphenPos] == "-")
+                            {
+                                // Separate hyphen, need to include next word
+                                nameEndIndex = hyphenPos + 1;
+                            }
+                            
+                            // Join the name parts and normalize hyphen
+                            var fullName = string.Join(" ", wordsForCheck.Take(nameEndIndex + 1));
+                            fullName = Regex.Replace(fullName, @"\s*-\s*", "-");
+                            var normalizedParts = fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            
+                            result.Name = fullName;
+                            result.FirstName = normalizedParts[0]; // Initial
+                            result.LastName = string.Join(" ", normalizedParts.Skip(1)); // Hyphenated last name
+                            
+                            // Extract address from remaining text
+                            if (wordsForCheck.Length > nameEndIndex + 1)
+                            {
+                                var remainingAfterName = string.Join(" ", wordsForCheck.Skip(nameEndIndex + 1));
+                                var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                                result.Address = addressParse.Address;
+                                result.Confidence.AddressConfidence = addressParse.AddressConfidence;
+                            }
+                            else
+                            {
+                                result.Address = "";
+                                result.Confidence.AddressConfidence = 0;
+                            }
+                            
+                            _logger.LogInformation($"Detected hyphenated name after initial: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+                        }
+                        else
+                        {
+                            // Standard initial-name pattern: "A Lucille" possibly followed by address
+                            var nameParts = wordsForCheck.Take(2).ToArray();
+                            result.Name = string.Join(" ", nameParts);
+                            result.LastName = nameParts[1];
+                            result.FirstName = nameParts[0];
+                            
+                            // Extract address from remaining text (like "Dieppe" in "A Lucille Dieppe")
+                            if (wordsForCheck.Length > 2)
+                            {
+                                var remainingAfterName = string.Join(" ", wordsForCheck.Skip(2));
+                                var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                                result.Address = addressParse.Address;
+                                result.Confidence.AddressConfidence = addressParse.AddressConfidence > 0 ? addressParse.AddressConfidence : 50;
+                                
+                                // If no clear address was found but there's text, treat it as possible community/address
+                                if (string.IsNullOrEmpty(result.Address) && !string.IsNullOrEmpty(remainingAfterName))
+                                {
+                                    result.Address = remainingAfterName.Split(' ')[0]; // Take first word as likely community
+                                    result.Confidence.AddressConfidence = 40;
+                                }
+                            }
+                            else
+                            {
+                                result.Address = "";
+                                result.Confidence.AddressConfidence = 0;
+                            }
+                            
+                            // Use classification service to determine business vs residential
+                            var classification = await _classificationService.ClassifyAsync(result.Name);
+                            result.IsBusinessName = classification.IsBusiness;
+                            result.IsResidentialName = classification.IsResidential;
+                            result.Confidence.NameConfidence = classification.Confidence;
+                            
+                            // Only split names if residential
+                            if (result.IsResidentialName)
+                            {
+                                // Already set LastName and FirstName above
+                            }
+                            
+                            result.Confidence.PhoneConfidence = 100;
+                            result.Success = true;
+                            
+                            _logger.LogInformation($"Parsed with initial-name pattern: '{input}' -> Name: '{result.Name}' classified as {(result.IsBusinessName ? "BUSINESS" : "RESIDENTIAL")}");
+                            
+                            return result;
+                        }
+                    }
+                }
+                else
+                {
+                    // Handle the case with only 2 words (no third word to check)
+                    var nameParts = wordsForCheck.Take(2).ToArray();
+                    result.Name = string.Join(" ", nameParts);
+                    result.Address = "";
+                    result.Confidence.AddressConfidence = 0;
+                    
+                    // Use classification service to determine business vs residential
+                    var classification = await _classificationService.ClassifyAsync(result.Name);
+                    result.IsBusinessName = classification.IsBusiness;
+                    result.IsResidentialName = classification.IsResidential;
+                    result.Confidence.NameConfidence = classification.Confidence;
+                    
+                    // Only split names if residential
+                    if (result.IsResidentialName)
+                    {
+                        result.LastName = nameParts[1];
+                        result.FirstName = nameParts[0];
+                    }
+                    
+                    result.Confidence.PhoneConfidence = 100;
+                    result.Success = true;
+                    
+                    _logger.LogInformation($"Parsed with initial-name pattern (2 words): '{input}' -> Name: '{result.Name}' classified as {(result.IsBusinessName ? "BUSINESS" : "RESIDENTIAL")}");
+                    
+                    return result;
+                }
             }
-            else if (residentialInitialPattern == "initial-initial-surname")
+            else if (residentialInitialPattern == "name-initial" && wordsForCheck.Length >= 2)
             {
-                // For "J M Smith", we want: LastName = "Smith", FirstName = "J M"
-                result.LastName = wordsForCheck[2]; // Last word is the surname
-                result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[1]}"; // First two are initials
+                // Pattern like "Lucille A" or "Adery J" followed by address/phone
+                var nameParts = wordsForCheck.Take(2).ToArray();
+                result.Name = string.Join(" ", nameParts);
+                
+                // Extract address from remaining text
+                if (wordsForCheck.Length > 2)
+                {
+                    var remainingAfterName = string.Join(" ", wordsForCheck.Skip(2));
+                    
+                    // If the remaining text starts with a number, it's clearly an address
+                    if (Regex.IsMatch(wordsForCheck[2], @"^\d+"))
+                    {
+                        result.Address = remainingAfterName;
+                        result.Confidence.AddressConfidence = 90;
+                    }
+                    else
+                    {
+                        var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                        result.Address = addressParse.Address;
+                        result.Confidence.AddressConfidence = addressParse.AddressConfidence;
+                    }
+                }
+                else
+                {
+                    result.Address = "";
+                    result.Confidence.AddressConfidence = 0;
+                }
+                
+                // Split name: LastName = first word, FirstName = second initial
+                result.LastName = nameParts[0];
+                result.FirstName = nameParts[1];
+                
+                result.IsBusinessName = false;
+                result.IsResidentialName = true;
+                result.Confidence.NameConfidence = 85;
+                result.Confidence.PhoneConfidence = 100;
+                result.Success = true;
+                
+                _logger.LogInformation($"Parsed as residential with name-initial pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}', Address: '{result.Address}'");
+                
+                return result;
             }
-            
-            result.Confidence.PhoneConfidence = 100;
-            result.Success = true;
-            
-            _logger.LogInformation($"Parsed as residential with {residentialInitialPattern} pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
-            
-            return result;
+            else if (wordsForCheck.Length == 3)
+            {
+                // Treat all 3 words as the name
+                result.Name = remainingText;
+                result.Address = "";
+                result.Confidence.AddressConfidence = 0;
+                
+                // It's a residential name
+                result.IsBusinessName = false;
+                result.IsResidentialName = true;
+                result.Confidence.NameConfidence = 85; // High confidence for this specific pattern
+                
+                // Split the name properly based on the pattern
+                if (residentialInitialPattern == "initial-surname-initial")
+                {
+                    // For "A Mwinkeu C", we want: LastName = "Mwinkeu", FirstName = "A C"
+                    result.LastName = wordsForCheck[1]; // Middle word is the surname
+                    result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[2]}"; // First and last are initials
+                }
+                else if (residentialInitialPattern == "initial-initial-surname")
+                {
+                    // For "J M Smith", we want: LastName = "Smith", FirstName = "J M"
+                    result.LastName = wordsForCheck[2]; // Last word is the surname
+                    result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[1]}"; // First two are initials
+                }
+                else if (residentialInitialPattern == "name-initial-initial")
+                {
+                    // For "Smith J M", we want: LastName = "Smith", FirstName = "J M"
+                    result.LastName = wordsForCheck[0]; // First word is the surname
+                    result.FirstName = $"{wordsForCheck[1]} {wordsForCheck[2]}"; // Last two are initials
+                }
+                
+                result.Confidence.PhoneConfidence = 100;
+                result.Success = true;
+                
+                _logger.LogInformation($"Parsed as residential with {residentialInitialPattern} pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+                
+                return result;
+            }
         }
         
         // Check if this looks like a phonebook entry (personal name format)
@@ -1550,6 +1886,11 @@ public class DatabaseDrivenParserService : IStringParserService
             return;
             
         var name = result.Name.Trim();
+        
+        // First, handle hyphenated names properly
+        // Normalize different hyphen formats: "C-C", "C - C", "C- C", "C -C" -> "C-C"
+        name = Regex.Replace(name, @"\s*-\s*", "-");
+        
         var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         
         if (parts.Length == 0)
@@ -1560,6 +1901,75 @@ public class DatabaseDrivenParserService : IStringParserService
             result.LastName = parts[0];
             result.FirstName = null;
             return;
+        }
+        
+        // Special handling for patterns like "A Lucille Dieppe" (initial-firstname-lastname)
+        // or "A Mwinkeu C" (initial-surname-initial)
+        if (parts.Length == 3)
+        {
+            var first = parts[0];
+            var middle = parts[1];
+            var last = parts[2];
+            
+            // Check if first is an initial
+            bool firstIsInitial = first.Length == 1 && char.IsLetter(first[0]);
+            // Check if last is an initial
+            bool lastIsInitial = last.Length == 1 && char.IsLetter(last[0]);
+            
+            if (firstIsInitial && !lastIsInitial)
+            {
+                // Pattern like "A Lucille Dieppe" -> LastName: "Dieppe", FirstName: "A Lucille"
+                // or "A Smith-Jones William" -> LastName: "William", FirstName: "A Smith-Jones"
+                result.LastName = last;
+                result.FirstName = $"{first} {middle}";
+                _logger.LogDebug($"Parsed initial-firstname-lastname pattern: '{name}' -> LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+                return;
+            }
+            else if (firstIsInitial && lastIsInitial)
+            {
+                // Pattern like "A Mwinkeu C" -> LastName: "Mwinkeu", FirstName: "A C"
+                result.LastName = middle;
+                result.FirstName = $"{first} {last}";
+                _logger.LogDebug($"Parsed initial-surname-initial pattern: '{name}' -> LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+                return;
+            }
+        }
+        
+        // Handle hyphenated last names
+        // Examples: "Adesola-Adeoye T" -> LastName: "Adesola-Adeoye", FirstName: "T"
+        //          "T Adesola-Adeoye" -> LastName: "Adesola-Adeoye", FirstName: "T"
+        var hyphenatedNamePattern = @"^(\w+)-(\w+)$";
+        
+        // Check if first part is hyphenated
+        if (Regex.IsMatch(parts[0], hyphenatedNamePattern))
+        {
+            // First part is hyphenated, likely a last name
+            result.LastName = parts[0];
+            result.FirstName = FormatFirstName(string.Join(" ", parts.Skip(1)));
+            _logger.LogDebug($"Parsed hyphenated last name first: '{name}' -> LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+            return;
+        }
+        
+        // Check if any part other than first is hyphenated
+        for (int i = 1; i < parts.Length; i++)
+        {
+            if (Regex.IsMatch(parts[i], hyphenatedNamePattern))
+            {
+                // Found hyphenated name not in first position
+                // If it's in second position and first is an initial, the hyphenated part is the last name
+                if (i == 1 && IsInitialOrMultipleInitials(parts[0]))
+                {
+                    result.LastName = parts[1];
+                    result.FirstName = parts[0];
+                    if (parts.Length > 2)
+                    {
+                        // Add any remaining parts to first name
+                        result.FirstName += " " + string.Join(" ", parts.Skip(2));
+                    }
+                    _logger.LogDebug($"Parsed initial then hyphenated last name: '{name}' -> LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
+                    return;
+                }
+            }
         }
         
         var firstPart = parts[0];
@@ -1641,5 +2051,137 @@ public class DatabaseDrivenParserService : IStringParserService
         public string Name { get; set; } = string.Empty;
         public string Address { get; set; } = string.Empty;
         public int AddressConfidence { get; set; }
+    }
+    
+    private async Task<string> DetectAndCorrectOCRErrors(string input, string? province)
+    {
+        var words = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        
+        // Pattern 1: Known name followed by "0" (likely OCR error for "O")
+        // Example: "Adesina 0 382-4955" -> "Adesina O 382-4955"
+        for (int i = 0; i < words.Length - 1; i++)
+        {
+            // Check if current word is a single "0" and previous word is a known name
+            if (words[i] == "0" && i > 0)
+            {
+                var prevWordLower = words[i - 1].ToLower();
+                
+                // Check if previous word is a known last name or "both" type name
+                var nameData = await _context.Set<WordData>()
+                    .Where(w => w.WordLower == prevWordLower && 
+                           (w.WordType == "last" || w.WordType == "both"))
+                    .FirstOrDefaultAsync();
+                
+                if (nameData != null && nameData.WordCount > 10) // Confidence threshold
+                {
+                    // This is likely an OCR error: 0 should be O
+                    words[i] = "O";
+                    _logger.LogInformation($"OCR correction: Detected '0' after known name '{words[i-1]}', correcting to 'O'");
+                }
+            }
+        }
+        
+        // Pattern 2: Initial+Number combined (e.g., "J7" should be "J 7")
+        // Example: "Adery J7 Point Park" -> "Adery J 7 Point Park"
+        for (int i = 0; i < words.Length; i++)
+        {
+            var word = words[i];
+            
+            // Check for pattern: single letter followed by numbers
+            var combinedPattern = Regex.Match(word, @"^([A-Z])(\d+)$");
+            if (combinedPattern.Success)
+            {
+                // Check if previous word is a known name (suggesting this is an initial+address)
+                bool shouldSplit = false;
+                
+                if (i > 0)
+                {
+                    var prevWordLower = words[i - 1].ToLower();
+                    var nameData = await _context.Set<WordData>()
+                        .Where(w => w.WordLower == prevWordLower && 
+                               (w.WordType == "last" || w.WordType == "both"))
+                        .FirstOrDefaultAsync();
+                    
+                    if (nameData != null && nameData.WordCount > 5)
+                    {
+                        shouldSplit = true;
+                    }
+                }
+                
+                // Also split if the next word looks like part of an address
+                if (!shouldSplit && i < words.Length - 1)
+                {
+                    var nextWord = words[i + 1];
+                    // Common street names or types
+                    if (Regex.IsMatch(nextWord, @"^(Park|Street|St|Avenue|Ave|Drive|Dr|Road|Rd|Point|Place|Pl)$", RegexOptions.IgnoreCase))
+                    {
+                        shouldSplit = true;
+                    }
+                }
+                
+                if (shouldSplit)
+                {
+                    // Split the combined initial+number
+                    var letter = combinedPattern.Groups[1].Value;
+                    var number = combinedPattern.Groups[2].Value;
+                    
+                    // Create new array with the split
+                    var newWords = new List<string>();
+                    for (int j = 0; j < i; j++)
+                        newWords.Add(words[j]);
+                    
+                    newWords.Add(letter);
+                    newWords.Add(number);
+                    
+                    for (int j = i + 1; j < words.Length; j++)
+                        newWords.Add(words[j]);
+                    
+                    words = newWords.ToArray();
+                    _logger.LogInformation($"OCR correction: Split '{word}' into '{letter}' and '{number}'");
+                    
+                    // Increment i since we added an extra word
+                    i++;
+                }
+            }
+        }
+        
+        // Pattern 3: Check for other common OCR errors
+        // "l" misread as "1", "I" misread as "1", etc. in name context
+        for (int i = 0; i < words.Length; i++)
+        {
+            // If we have a single "1" in a position that should be a name
+            if (words[i] == "1")
+            {
+                // Check if surrounding context suggests this should be an initial
+                bool likelyInitial = false;
+                
+                // If previous word is a known name and next is not a number
+                if (i > 0 && i < words.Length - 1)
+                {
+                    var prevWordLower = words[i - 1].ToLower();
+                    var nextWord = words[i + 1];
+                    
+                    // Check if previous is a known name
+                    var nameData = await _context.Set<WordData>()
+                        .Where(w => w.WordLower == prevWordLower && 
+                               (w.WordType == "first" || w.WordType == "last" || w.WordType == "both"))
+                        .FirstOrDefaultAsync();
+                    
+                    // If previous is a name and next is not a number, likely an initial
+                    if (nameData != null && !Regex.IsMatch(nextWord, @"^\d"))
+                    {
+                        likelyInitial = true;
+                    }
+                }
+                
+                if (likelyInitial)
+                {
+                    words[i] = "I"; // Most common correction for "1" in name context
+                    _logger.LogInformation($"OCR correction: Detected '1' in name context, correcting to 'I'");
+                }
+            }
+        }
+        
+        return string.Join(" ", words);
     }
 }

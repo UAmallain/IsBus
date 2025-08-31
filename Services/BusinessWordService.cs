@@ -165,6 +165,19 @@ public class BusinessWordService : IBusinessWordService
         }
     }
     
+    private bool IsDebugPhrase(string phrase)
+    {
+        if (string.IsNullOrEmpty(phrase)) return false;
+        
+        var debugStarts = new[] { 
+            "Adshade", "Adsett", "Adesina", "Adeoye", "Adebukola", 
+            "Addington", "Adao", "Adams", "Adair", "Ackman", 
+            "Abli", "Aberathna", "Abdelhadi" 
+        };
+        
+        return debugStarts.Any(s => phrase.StartsWith(s, StringComparison.OrdinalIgnoreCase));
+    }
+    
     public async Task<Dictionary<string, BusinessIndicatorStrength>> AnalyzeWordsAsync(string[] words)
     {
         var result = new Dictionary<string, BusinessIndicatorStrength>();
@@ -228,15 +241,16 @@ public class BusinessWordService : IBusinessWordService
             // Find the maximum name count
             var maxNameCount = Math.Max(Math.Max(firstCount, lastCount), bothCount);
             
-            // Apply the same logic as GetWordStrengthAsync
-            // If name counts are significantly higher than business count, it's not a business word
-            if (maxNameCount > businessData.WordCount * 2 && maxNameCount >= 50)
+            // CRITICAL: Use the HIGHEST count to determine the word's primary type
+            // If name counts are higher than business count, it's NOT a business word
+            if (maxNameCount > businessData.WordCount)
             {
                 result[word] = BusinessIndicatorStrength.None;
             }
-            // If business count is significantly higher than name counts, use normal strength calculation
-            else if (businessData.WordCount > maxNameCount * 2 || maxNameCount < 10)
+            // Only if business count is the HIGHEST should we consider it a business word
+            else if (businessData.WordCount >= maxNameCount)
             {
+                // But still check if it's a significant business indicator
                 result[word] = businessData.WordCount switch
                 {
                     >= 5000 => BusinessIndicatorStrength.Absolute,
@@ -245,28 +259,18 @@ public class BusinessWordService : IBusinessWordService
                     >= 10 => BusinessIndicatorStrength.Weak,
                     _ => BusinessIndicatorStrength.None
                 };
-            }
-            // Counts are comparable - reduce strength since it could be either
-            else
-            {
-                // Reduce the strength by one level due to ambiguity
-                var baseStrength = businessData.WordCount switch
-                {
-                    >= 5000 => BusinessIndicatorStrength.Absolute,
-                    >= 1000 => BusinessIndicatorStrength.Strong,
-                    >= 100 => BusinessIndicatorStrength.Medium,
-                    >= 10 => BusinessIndicatorStrength.Weak,
-                    _ => BusinessIndicatorStrength.None
-                };
                 
-                // Reduce by one level
-                result[word] = baseStrength switch
+                // If name counts are close (within 50% of business count), reduce strength
+                if (maxNameCount > businessData.WordCount * 0.5)
                 {
-                    BusinessIndicatorStrength.Absolute => BusinessIndicatorStrength.Strong,
-                    BusinessIndicatorStrength.Strong => BusinessIndicatorStrength.Medium,
-                    BusinessIndicatorStrength.Medium => BusinessIndicatorStrength.Weak,
-                    _ => BusinessIndicatorStrength.None
-                };
+                    result[word] = result[word] switch
+                    {
+                        BusinessIndicatorStrength.Absolute => BusinessIndicatorStrength.Strong,
+                        BusinessIndicatorStrength.Strong => BusinessIndicatorStrength.Medium,
+                        BusinessIndicatorStrength.Medium => BusinessIndicatorStrength.Weak,
+                        _ => BusinessIndicatorStrength.None
+                    };
+                }
             }
         }
         
@@ -278,8 +282,24 @@ public class BusinessWordService : IBusinessWordService
         if (string.IsNullOrWhiteSpace(phrase))
             return (false, BusinessIndicatorStrength.None, "Empty phrase");
         
+        // Debug logging for specific records
+        bool enableDebug = IsDebugPhrase(phrase);
+        if (enableDebug)
+        {
+            _logger.LogInformation($"DEBUG BusinessWordService.AnalyzePhraseAsync: '{phrase}'");
+        }
+        
         var words = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var wordStrengths = await AnalyzeWordsAsync(words);
+        
+        if (enableDebug)
+        {
+            _logger.LogInformation($"  Word strengths for '{phrase}':");
+            foreach (var kvp in wordStrengths)
+            {
+                _logger.LogInformation($"    '{kvp.Key}': {kvp.Value}");
+            }
+        }
         
         // Debug logging for important cases
         if (phrase.Contains("Abraham", StringComparison.OrdinalIgnoreCase) || 
