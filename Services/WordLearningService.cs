@@ -134,9 +134,22 @@ public class WordLearningService : IWordLearningService
             else if (parseResult.IsBusinessName && !string.IsNullOrWhiteSpace(parseResult.Name))
             {
                 var businessWords = SplitIntoWords(parseResult.Name);
+                
+                // Count learnable words (non-initials, non-skip words)
+                var learnableWords = new List<string>();
                 foreach (var word in businessWords)
                 {
                     if (await ShouldLearnWordAsync(word))
+                    {
+                        learnableWords.Add(word);
+                    }
+                }
+                
+                // Only learn if we have at least 2 meaningful words
+                // This prevents learning from entries like "A Dizon" which only has 1 meaningful word
+                if (learnableWords.Count >= 2)
+                {
+                    foreach (var word in learnableWords)
                     {
                         if (await UpdateWordCountAsync(word, "business"))
                         {
@@ -144,6 +157,10 @@ public class WordLearningService : IWordLearningService
                             _logger.LogDebug($"Updated business word: {word}");
                         }
                     }
+                }
+                else
+                {
+                    _logger.LogInformation($"Skipping business learning - only {learnableWords.Count} learnable words in: {parseResult.Name}");
                 }
             }
             

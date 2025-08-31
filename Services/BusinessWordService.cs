@@ -173,9 +173,11 @@ public class BusinessWordService : IBusinessWordService
             return result;
         
         // Clean and deduplicate words
+        // IMPORTANT: Skip single letters (initials) as they should not be considered business indicators
         var cleanWords = words
             .Where(w => !string.IsNullOrWhiteSpace(w))
             .Select(w => w.ToLower().Trim('.', ',', '\'', '"'))
+            .Where(w => w.Length > 1) // Skip single letters (initials)
             .Distinct()
             .ToArray();
         
@@ -198,6 +200,16 @@ public class BusinessWordService : IBusinessWordService
             
             // Get all entries for this word
             var wordEntries = allWordDataList.Where(w => w.WordLower == word).ToList();
+            
+            // Special debug for problem words
+            if (word == "abdelhadi" || word == "aberathna")
+            {
+                _logger.LogInformation($"DEBUG BusinessWordService: Found {wordEntries.Count} entries for '{word}':");
+                foreach (var entry in wordEntries)
+                {
+                    _logger.LogInformation($"  - {entry.WordType}: {entry.WordCount}");
+                }
+            }
             
             // Find the business entry specifically
             var businessData = wordEntries.FirstOrDefault(w => w.WordType == "business");

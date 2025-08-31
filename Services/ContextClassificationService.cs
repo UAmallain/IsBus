@@ -231,9 +231,30 @@ public class ContextClassificationService : IClassificationService
         businessScore += patterns.HasPossessiveWithBusiness ? 50 : 0;
         
         // Initials followed by business words is a strong business indicator
-        if (initialWords > 0 && businessWords > 0 && nameWords == 0)
+        // BUT: Don't apply this if we have unknown words that could be names
+        if (initialWords > 0 && businessWords > 0 && nameWords == 0 && unknownWords == 0)
         {
             businessScore += 60; // Strong business pattern
+        }
+        
+        // Special case: Initial + Unknown word pattern (like "A Dizon")
+        // This is likely a residential name where the surname isn't in our database
+        if (initialWords > 0 && unknownWords > 0 && businessWords == 0)
+        {
+            residentialScore += 40; // Likely residential pattern
+        }
+        
+        // Special boost for names with very high "both" counts - strong residential indicator
+        // Example: "A Kevin" where Kevin has both count > 7000
+        bool hasHighBothCount = false;
+        foreach (var context in contextMap)
+        {
+            if (context.BothCount > 500) // High threshold for "both" names
+            {
+                hasHighBothCount = true;
+                residentialScore += Math.Min(50, context.BothCount / 100); // Scale bonus based on count
+                break;
+            }
         }
         
         // Residential indicators
@@ -428,15 +449,19 @@ public class ContextClassificationService : IClassificationService
             c.PrimaryType == WordTypeEnum.First || 
             c.PrimaryType == WordTypeEnum.Last || 
             c.PrimaryType == WordTypeEnum.Both);
+        int unknownCount = contextMap.Count(c => c.PrimaryType == WordTypeEnum.Unknown);
         
-        // If we have initials with at least one name, it's a name pattern
-        if (initialCount > 0 && nameCount > 0)
+        // If we have initials with at least one name OR unknown word (potential name), it's likely a name pattern
+        // Examples: "A Dizon" where Dizon is unknown, "J Smith" where Smith is known
+        if (initialCount > 0 && (nameCount > 0 || unknownCount > 0))
         {
             analysis.HasInitialPattern = true;
             
             // Check specific patterns
-            // Pattern 1: Name Initial(s) - "Smith J" or "Smith J M"
-            if (contextMap[0].PrimaryType == WordTypeEnum.Last || contextMap[0].PrimaryType == WordTypeEnum.Both)
+            // Pattern 1: Name Initial(s) - "Smith J" or "Smith J M" or "Dizon A" (where Dizon is unknown)
+            if (contextMap[0].PrimaryType == WordTypeEnum.Last || 
+                contextMap[0].PrimaryType == WordTypeEnum.Both ||
+                contextMap[0].PrimaryType == WordTypeEnum.Unknown)
             {
                 bool allRemainingAreInitialsOrConnectors = true;
                 for (int i = 1; i < contextMap.Count; i++)
@@ -455,9 +480,10 @@ public class ContextClassificationService : IClassificationService
                 }
             }
             
-            // Pattern 2: Initial(s) Name - "J Smith" or "J M Smith"
+            // Pattern 2: Initial(s) Name - "J Smith" or "J M Smith" or "A Dizon"
             if (contextMap[contextMap.Count - 1].PrimaryType == WordTypeEnum.Last || 
-                contextMap[contextMap.Count - 1].PrimaryType == WordTypeEnum.Both)
+                contextMap[contextMap.Count - 1].PrimaryType == WordTypeEnum.Both ||
+                contextMap[contextMap.Count - 1].PrimaryType == WordTypeEnum.Unknown)
             {
                 bool allPrecedingAreInitialsOrConnectors = true;
                 for (int i = 0; i < contextMap.Count - 1; i++)

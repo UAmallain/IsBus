@@ -98,56 +98,72 @@ public class DatabaseDrivenParserService : IStringParserService
         bool looksLikeResidentialWithInitials = false;
         string residentialInitialPattern = "";
         
-        // Check for initial patterns with 2 or 3 words
+        // Check for initial patterns in the FIRST 2 or 3 words
         // This preliminary check can be overridden by strong business indicators
-        if (wordsForCheck.Length == 2)
+        // We only look at the beginning of the text since it may include an address
+        if (wordsForCheck.Length >= 2)
         {
-            // Check for "Initial Name" or "Name Initial" patterns
-            bool firstIsInitial = wordsForCheck[0].Length <= 2 && wordsForCheck[0].All(c => char.IsLetter(c) || c == '.');
-            bool lastIsInitial = wordsForCheck[1].Length <= 2 && wordsForCheck[1].All(c => char.IsLetter(c) || c == '.');
-            bool firstIsName = wordsForCheck[0].Length > 2 && char.IsLetter(wordsForCheck[0][0]);
-            bool lastIsName = wordsForCheck[1].Length > 2 && char.IsLetter(wordsForCheck[1][0]);
+            // Check for "Initial Name" or "Name Initial" patterns in first 2 words
+            // An initial is a single letter (with or without period)
+            bool firstIsInitial = (wordsForCheck[0].Length == 1 && char.IsLetter(wordsForCheck[0][0])) ||
+                                 (wordsForCheck[0].Length == 2 && wordsForCheck[0][1] == '.' && char.IsLetter(wordsForCheck[0][0]));
+            bool secondIsInitial = (wordsForCheck[1].Length == 1 && char.IsLetter(wordsForCheck[1][0])) ||
+                                  (wordsForCheck[1].Length == 2 && wordsForCheck[1][1] == '.' && char.IsLetter(wordsForCheck[1][0]));
             
-            if (firstIsInitial && lastIsName)
+            // A name is anything longer than an initial
+            bool firstIsName = !firstIsInitial && wordsForCheck[0].Length >= 2 && char.IsLetter(wordsForCheck[0][0]);
+            bool secondIsName = !secondIsInitial && wordsForCheck[1].Length >= 2 && char.IsLetter(wordsForCheck[1][0]);
+            
+            // Log at INFO level for debugging these specific cases
+            if (wordsForCheck[0].StartsWith("Abdel") || wordsForCheck[0].StartsWith("Aber"))
+            {
+                _logger.LogInformation($"SPECIAL DEBUG - Initial detection for '{wordsForCheck[0]}' (len={wordsForCheck[0].Length}) and '{wordsForCheck[1]}' (len={wordsForCheck[1].Length}): " +
+                               $"firstIsInitial={firstIsInitial}, secondIsInitial={secondIsInitial}, " +
+                               $"firstIsName={firstIsName}, secondIsName={secondIsName}, " +
+                               $"first[0]='{wordsForCheck[0][0]}', isLetter={char.IsLetter(wordsForCheck[0][0])}");
+            }
+            
+            if (firstIsInitial && secondIsName)
             {
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "initial-name";
                 _logger.LogDebug($"Detected POTENTIAL residential pattern 'initial name': {remainingText}");
             }
-            else if (firstIsName && lastIsInitial)
+            else if (firstIsName && secondIsInitial)
             {
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "name-initial";
                 _logger.LogDebug($"Detected POTENTIAL residential pattern 'name initial': {remainingText}");
             }
         }
-        else if (wordsForCheck.Length == 3)
+        
+        if (!looksLikeResidentialWithInitials && wordsForCheck.Length >= 3)
         {
-            // Check if first and last are single letters (initials)
-            bool firstIsInitial = wordsForCheck[0].Length <= 2 && wordsForCheck[0].All(c => char.IsLetter(c) || c == '.');
-            bool lastIsInitial = wordsForCheck[2].Length <= 2 && wordsForCheck[2].All(c => char.IsLetter(c) || c == '.');
-            bool middleIsName = wordsForCheck[1].Length > 2 && char.IsLetter(wordsForCheck[1][0]);
+            // Check patterns in first 3 words
+            bool firstIsInitial = (wordsForCheck[0].Length == 1 && char.IsLetter(wordsForCheck[0][0])) ||
+                                 (wordsForCheck[0].Length == 2 && wordsForCheck[0][1] == '.' && char.IsLetter(wordsForCheck[0][0]));
+            bool secondIsInitial = (wordsForCheck[1].Length == 1 && char.IsLetter(wordsForCheck[1][0])) ||
+                                  (wordsForCheck[1].Length == 2 && wordsForCheck[1][1] == '.' && char.IsLetter(wordsForCheck[1][0]));
+            bool thirdIsInitial = (wordsForCheck[2].Length == 1 && char.IsLetter(wordsForCheck[2][0])) ||
+                                 (wordsForCheck[2].Length == 2 && wordsForCheck[2][1] == '.' && char.IsLetter(wordsForCheck[2][0]));
             
-            // Also check for "Initial Initial Surname" pattern
-            bool secondIsInitial = wordsForCheck[1].Length <= 2 && wordsForCheck[1].All(c => char.IsLetter(c) || c == '.');
-            bool lastIsName = wordsForCheck[2].Length > 2 && char.IsLetter(wordsForCheck[2][0]);
+            bool firstIsName = !firstIsInitial && wordsForCheck[0].Length >= 2 && char.IsLetter(wordsForCheck[0][0]);
+            bool secondIsName = !secondIsInitial && wordsForCheck[1].Length >= 2 && char.IsLetter(wordsForCheck[1][0]);
+            bool thirdIsName = !thirdIsInitial && wordsForCheck[2].Length >= 2 && char.IsLetter(wordsForCheck[2][0]);
             
-            // Also check for "Name Initial Initial" pattern (like "Abdelhai H B")
-            bool firstIsName = wordsForCheck[0].Length > 2 && char.IsLetter(wordsForCheck[0][0]);
-            
-            if (firstIsInitial && lastIsInitial && middleIsName)
+            if (firstIsInitial && thirdIsInitial && secondIsName)
             {
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "initial-surname-initial";
                 _logger.LogDebug($"Detected POTENTIAL residential pattern 'initial surname initial': {remainingText}");
             }
-            else if (firstIsInitial && secondIsInitial && lastIsName)
+            else if (firstIsInitial && secondIsInitial && thirdIsName)
             {
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "initial-initial-surname";
                 _logger.LogDebug($"Detected POTENTIAL residential pattern 'initial initial surname': {remainingText}");
             }
-            else if (firstIsName && secondIsInitial && lastIsInitial)
+            else if (firstIsName && secondIsInitial && thirdIsInitial)
             {
                 looksLikeResidentialWithInitials = true;
                 residentialInitialPattern = "name-initial-initial";
@@ -165,19 +181,34 @@ public class DatabaseDrivenParserService : IStringParserService
         // Log the business analysis result for debugging
         _logger.LogDebug($"Business analysis for '{remainingText}': isBusiness={businessAnalysis.isBusiness}, maxStrength={businessAnalysis.maxStrength}, reason={businessAnalysis.reason}");
         
-        if (hasStrongBusinessWords)
+        // If we detected a residential pattern with initials, only override it for absolute business indicators
+        if (looksLikeResidentialWithInitials)
+        {
+            if (businessAnalysis.maxStrength == BusinessIndicatorStrength.Absolute)
+            {
+                forceAsBusiness = true;
+                isLikelyBusiness = true;
+                looksLikeResidentialWithInitials = false; // Override residential pattern
+                _logger.LogDebug($"Absolute business indicator found - overriding residential pattern");
+            }
+            else
+            {
+                // Keep the residential pattern - initials with names are typically residential
+                forceAsBusiness = false;
+                isLikelyBusiness = false;
+                _logger.LogDebug($"Keeping residential pattern despite business analysis (strength={businessAnalysis.maxStrength})");
+            }
+        }
+        else if (hasStrongBusinessWords)
         {
             forceAsBusiness = true;
             isLikelyBusiness = true;
-            looksLikeResidentialWithInitials = false; // Override any residential pattern
-            _logger.LogDebug($"Strong business indicators found - overriding any residential pattern");
+            _logger.LogDebug($"Strong business indicators found");
         }
-        // Even if not classified as business by phrase analysis, check for absolute indicators
         else if (businessAnalysis.maxStrength == BusinessIndicatorStrength.Absolute)
         {
             forceAsBusiness = true;
             isLikelyBusiness = true;
-            looksLikeResidentialWithInitials = false; // Override any residential pattern
             _logger.LogDebug($"Absolute business indicator found - forcing as business");
         }
         
@@ -222,7 +253,7 @@ public class DatabaseDrivenParserService : IStringParserService
             isLikelyBusiness = true; // Force as business
         }
         
-        _logger.LogInformation($"Text: '{remainingText}' - forceAsBusiness: {forceAsBusiness}, isLikelyBusiness: {isLikelyBusiness}, looksLikeResidentialWithInitials: {looksLikeResidentialWithInitials}");
+        _logger.LogInformation($"Text: '{remainingText}' - forceAsBusiness: {forceAsBusiness}, isLikelyBusiness: {isLikelyBusiness}, looksLikeResidentialWithInitials: {looksLikeResidentialWithInitials}, residentialPattern: '{residentialInitialPattern}'");
         
         // For business entries, handle address detection carefully (skip if it's clearly residential)
         if (isLikelyBusiness && !looksLikeResidentialWithInitials)
