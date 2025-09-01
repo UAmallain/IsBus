@@ -484,22 +484,50 @@ public class ContextClassificationService : IClassificationService
         {
             // Special handling for two-word entries
             // Many residential names are "LastName FirstName" or "FirstName LastName"
-            // If we have one name word and one business word, lean toward residential
-            if (nameWords == 1 && businessWords == 1)
+            if (nameWords == 2)
             {
+                // Both words are names - STRONG residential indicator
+                residentialScore += 80;
+                if (enableDebug) _logger.LogWarning($"    Residential: +80 for two name words");
+            }
+            else if (nameWords == 1 && businessWords == 1)
+            {
+                // One name word and one business word - could be either
                 residentialScore += 20;
                 if (enableDebug) _logger.LogWarning($"    Residential: +20 for two-word pattern with one name");
+            }
+            else if (nameWords == 1 && unknownWords == 1)
+            {
+                // One name word and one unknown - likely residential with uncommon name
+                residentialScore += 40;
+                if (enableDebug) _logger.LogWarning($"    Residential: +40 for name + unknown word");
+            }
+            else
+            {
+                // No name words at all in a two-word entry - likely business
+                residentialScore -= 20;
+                businessScore += 30;
+                if (enableDebug) 
+                {
+                    _logger.LogWarning($"    Residential: -20 for no name words in two-word entry");
+                    _logger.LogWarning($"    Business: +30 for no name words in two-word entry");
+                }
+            }
+        }
+        else
+        {
+            // For 3+ word entries without a detected pattern
+            // Check if we have multiple name words - if so, it's likely still residential
+            if (contextMap.Count >= 3 && nameWords >= 2)
+            {
+                residentialScore += 30;  // Multiple names suggest residential even without perfect pattern
+                if (enableDebug) _logger.LogWarning($"    Residential: +30 for {nameWords} name words in multi-word entry");
             }
             else
             {
                 residentialScore -= 20;
                 if (enableDebug) _logger.LogWarning($"    Residential: -20 for no valid name pattern");
             }
-        }
-        else
-        {
-            residentialScore -= 20;
-            if (enableDebug) _logger.LogWarning($"    Residential: -20 for no valid name pattern");
         }
         
         if (patterns.HasFirstLastPattern)
@@ -512,6 +540,12 @@ public class ContextClassificationService : IClassificationService
         {
             residentialScore += 50;
             if (enableDebug) _logger.LogWarning($"    Residential: +50 for initial pattern ({patterns.InitialPatternType})");
+        }
+        
+        if (patterns.HasCouplePattern)
+        {
+            residentialScore += 70;  // Strong residential indicator - couples
+            if (enableDebug) _logger.LogWarning($"    Residential: +70 for couple pattern (name & name)");
         }
         
         if (nameWords > 0)
@@ -646,6 +680,45 @@ public class ContextClassificationService : IClassificationService
                 _logger.LogWarning($"    Pattern: Has initial pattern ({analysis.InitialPatternType}) - marking as valid name pattern");
             }
             return analysis; // Early return for clear residential patterns
+        }
+        
+        // Check for couple patterns (Name & Name) - STRONG residential indicator
+        int connectorCount = contextMap.Count(c => c.PrimaryType == WordTypeEnum.Connector);
+        if (connectorCount > 0)
+        {
+            // Count names around connectors
+            int namesAroundConnectors = 0;
+            for (int i = 0; i < contextMap.Count; i++)
+            {
+                if (contextMap[i].PrimaryType == WordTypeEnum.Connector)
+                {
+                    // Check if there's a name/initial before and after
+                    bool hasNameBefore = i > 0 && (
+                        contextMap[i-1].PrimaryType == WordTypeEnum.First ||
+                        contextMap[i-1].PrimaryType == WordTypeEnum.Last ||
+                        contextMap[i-1].PrimaryType == WordTypeEnum.Both ||
+                        contextMap[i-1].PrimaryType == WordTypeEnum.Initial ||
+                        contextMap[i-1].PrimaryType == WordTypeEnum.Unknown);
+                    
+                    bool hasNameAfter = i < contextMap.Count - 1 && (
+                        contextMap[i+1].PrimaryType == WordTypeEnum.First ||
+                        contextMap[i+1].PrimaryType == WordTypeEnum.Last ||
+                        contextMap[i+1].PrimaryType == WordTypeEnum.Both ||
+                        contextMap[i+1].PrimaryType == WordTypeEnum.Initial ||
+                        contextMap[i+1].PrimaryType == WordTypeEnum.Unknown);
+                    
+                    if (hasNameBefore && hasNameAfter)
+                    {
+                        namesAroundConnectors++;
+                        analysis.HasCouplePattern = true;
+                        analysis.HasValidNamePattern = true;
+                        if (enableDebug)
+                        {
+                            _logger.LogWarning($"    Pattern: Found couple pattern (name & name)");
+                        }
+                    }
+                }
+            }
         }
         
         // Check for standard name patterns
@@ -890,4 +963,5 @@ public class PatternAnalysis
     public bool HasPossessiveWithBusiness { get; set; }
     public bool HasInitialPattern { get; set; }
     public string InitialPatternType { get; set; } = string.Empty;
+    public bool HasCouplePattern { get; set; }
 }
