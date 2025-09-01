@@ -39,9 +39,12 @@ public class WordLearningService : IWordLearningService
     
     public async Task<int> LearnFromParseResultAsync(ParseResult parseResult, int minimumConfidence = 95)
     {
+        // SPECIAL DEBUG: Log when learning is attempted
+        _logger.LogWarning($"[WORD_LEARNING START] Attempting to learn from: '{parseResult?.Input}' (Success={parseResult?.Success}, MinConfidence={minimumConfidence})");
+        
         if (parseResult == null || !parseResult.Success)
         {
-            _logger.LogDebug($"Skipping learning - parse result null or unsuccessful");
+            _logger.LogWarning($"[WORD_LEARNING SKIP] Parse result null or unsuccessful");
             return 0;
         }
         
@@ -49,14 +52,14 @@ public class WordLearningService : IWordLearningService
         var nameConfidence = parseResult.Confidence?.NameConfidence ?? 0;
         if (nameConfidence < minimumConfidence)
         {
-            _logger.LogInformation($"Skipping learning - confidence {nameConfidence}% is below threshold {minimumConfidence}% for: {parseResult.Input}");
+            _logger.LogWarning($"[WORD_LEARNING SKIP] Confidence {nameConfidence}% is below threshold {minimumConfidence}% for: {parseResult.Input}");
             return 0;
         }
         
         // Additional safety check: Don't learn if classification is uncertain
         if (!parseResult.IsBusinessName && !parseResult.IsResidentialName)
         {
-            _logger.LogInformation($"Skipping learning - unclear classification (neither business nor residential) for: {parseResult.Input}");
+            _logger.LogWarning($"[WORD_LEARNING SKIP] Unclear classification (neither business nor residential) for: {parseResult.Input}");
             return 0;
         }
         
@@ -67,12 +70,12 @@ public class WordLearningService : IWordLearningService
             var words = parseResult.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             if (words.Length == 2 && parseResult.IsBusinessName && string.IsNullOrWhiteSpace(parseResult.FirstName) && string.IsNullOrWhiteSpace(parseResult.LastName))
             {
-                _logger.LogInformation($"Skipping learning - two-word business name might be residential: {parseResult.Input}");
+                _logger.LogWarning($"[WORD_LEARNING SKIP] Two-word business name might be residential: {parseResult.Input}");
                 return 0;
             }
         }
             
-        _logger.LogInformation($"Learning from parse result (confidence: {nameConfidence}%): Input='{parseResult.Input}', IsRes={parseResult.IsResidentialName}, IsBus={parseResult.IsBusinessName}, FirstName='{parseResult.FirstName}', LastName='{parseResult.LastName}'");
+        _logger.LogWarning($"[WORD_LEARNING PROCEED] Learning from parse result (confidence: {nameConfidence}%): Input='{parseResult.Input}', IsRes={parseResult.IsResidentialName}, IsBus={parseResult.IsBusinessName}, FirstName='{parseResult.FirstName}', LastName='{parseResult.LastName}'");
             
         int updatedCount = 0;
         
@@ -89,15 +92,16 @@ public class WordLearningService : IWordLearningService
                     {
                         if (await ShouldLearnWordAsync(word))
                         {
+                            _logger.LogWarning($"[WORD_LEARNING] Processing FIRST name word: '{word}'");
                             if (await UpdateWordCountAsync(word, "first"))
                             {
                                 updatedCount++;
-                                _logger.LogInformation($"Updated first name word: '{word}'");
+                                _logger.LogWarning($"[WORD_LEARNING SUCCESS] Updated FIRST name word: '{word}'");
                             }
                         }
                         else
                         {
-                            _logger.LogDebug($"Skipped first name word: '{word}'");
+                            _logger.LogDebug($"[WORD_LEARNING] Skipped FIRST name word: '{word}'");
                         }
                     }
                 }
@@ -110,15 +114,16 @@ public class WordLearningService : IWordLearningService
                     {
                         if (await ShouldLearnWordAsync(word))
                         {
+                            _logger.LogWarning($"[WORD_LEARNING] Processing LAST name word: '{word}'");
                             if (await UpdateWordCountAsync(word, "last"))
                             {
                                 updatedCount++;
-                                _logger.LogInformation($"Updated last name word: '{word}'");
+                                _logger.LogWarning($"[WORD_LEARNING SUCCESS] Updated LAST name word: '{word}'");
                             }
                         }
                         else
                         {
-                            _logger.LogDebug($"Skipped last name word: '{word}'");
+                            _logger.LogDebug($"[WORD_LEARNING] Skipped LAST name word: '{word}'");
                         }
                     }
                 }
@@ -133,10 +138,11 @@ public class WordLearningService : IWordLearningService
                     {
                         if (await ShouldLearnWordAsync(word))
                         {
+                            _logger.LogWarning($"[WORD_LEARNING] Processing BOTH name word: '{word}'");
                             if (await UpdateWordCountAsync(word, "both"))
                             {
                                 updatedCount++;
-                                _logger.LogDebug($"Updated name word (both): {word}");
+                                _logger.LogWarning($"[WORD_LEARNING SUCCESS] Updated BOTH name word: '{word}'");
                             }
                         }
                     }
@@ -163,10 +169,11 @@ public class WordLearningService : IWordLearningService
                 {
                     foreach (var word in learnableWords)
                     {
+                        _logger.LogWarning($"[WORD_LEARNING] Processing BUSINESS word: '{word}'");
                         if (await UpdateWordCountAsync(word, "business"))
                         {
                             updatedCount++;
-                            _logger.LogDebug($"Updated business word: {word}");
+                            _logger.LogWarning($"[WORD_LEARNING SUCCESS] Updated BUSINESS word: '{word}'");
                         }
                     }
                 }
@@ -178,7 +185,11 @@ public class WordLearningService : IWordLearningService
             
             if (updatedCount > 0)
             {
-                _logger.LogInformation($"Learned {updatedCount} words from parse result: {parseResult.Input}");
+                _logger.LogWarning($"[WORD_LEARNING COMPLETE] Successfully learned {updatedCount} words from: {parseResult.Input}");
+            }
+            else
+            {
+                _logger.LogWarning($"[WORD_LEARNING COMPLETE] No words learned from: {parseResult.Input}");
             }
         }
         catch (Exception ex)
@@ -208,7 +219,9 @@ public class WordLearningService : IWordLearningService
                 var oldCount = existingWord.WordCount;
                 existingWord.WordCount = existingWord.WordCount + 1;
                 existingWord.LastSeen = DateTime.UtcNow;
-                _logger.LogInformation($"Incremented count for '{wordLower}' ({wordType}): {oldCount} -> {existingWord.WordCount}");
+                
+                // SPECIAL DEBUG: Log word_data table UPDATE
+                _logger.LogWarning($"[WORD_DATA UPDATE] Incrementing '{wordLower}' type='{wordType}' count: {oldCount} -> {existingWord.WordCount} (WordId={existingWord.WordId})");
             }
             else
             {
@@ -223,11 +236,15 @@ public class WordLearningService : IWordLearningService
                 };
                 
                 _context.WordData.Add(newWord);
-                _logger.LogInformation($"Added new word '{wordLower}' ({wordType}) with initial count 1");
+                
+                // SPECIAL DEBUG: Log word_data table INSERT
+                _logger.LogWarning($"[WORD_DATA INSERT] Adding new word '{wordLower}' type='{wordType}' with initial count=1");
             }
             
             var changes = await _context.SaveChangesAsync();
-            _logger.LogInformation($"SaveChangesAsync returned {changes} changes for word '{wordLower}' ({wordType})");
+            
+            // SPECIAL DEBUG: Confirm database commit
+            _logger.LogWarning($"[WORD_DATA COMMIT] SaveChangesAsync committed {changes} changes for '{wordLower}' type='{wordType}'");
             return true;
         }
         catch (Exception ex)
@@ -254,10 +271,17 @@ public class WordLearningService : IWordLearningService
             return false;
         }
             
-        // Skip numbers
+        // Skip pure numbers
         if (Regex.IsMatch(wordLower, @"^\d+$"))
         {
-            _logger.LogDebug($"Skipping number: '{wordLower}'");
+            _logger.LogDebug($"Skipping pure number: '{wordLower}'");
+            return false;
+        }
+        
+        // Skip ANY word containing numbers (prevents learning gibberish like "28-20-3w", "i2s", "0z7", "a316", etc.)
+        if (Regex.IsMatch(wordLower, @"\d"))
+        {
+            _logger.LogWarning($"[WORD_LEARNING SKIP] Skipping word with numbers: '{wordLower}'");
             return false;
         }
             

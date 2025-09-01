@@ -117,7 +117,8 @@
       "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
       "Bash(/mnt/c/Program Files/dotnet/dotnet.exe run test_cardinal_directions.cs)",
       "Bash(ASPNETCORE_URLS=\"http://0.0.0.0:5086\" ./bin/Debug/net8.0/PhoneBookParserAPI.exe)",
-      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe run test_cardinal_logic.cs)"
+      "Bash(/mnt/c/Program Files/dotnet/dotnet.exe run test_cardinal_logic.cs)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 67824)"
     ],
     "deny": [],
     "ask": []

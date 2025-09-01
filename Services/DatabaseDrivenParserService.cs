@@ -634,7 +634,7 @@ public class DatabaseDrivenParserService : IStringParserService
                         if (wordsForCheck.Length > 3)
                         {
                             var remainingAfterName = string.Join(" ", wordsForCheck.Skip(3));
-                            var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                            var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province, forceAsBusiness || isLikelyBusiness);
                             result.Address = addressParse.Address;
                             result.Confidence.AddressConfidence = addressParse.AddressConfidence;
                         }
@@ -661,7 +661,7 @@ public class DatabaseDrivenParserService : IStringParserService
                         if (wordsForCheck.Length > 3)
                         {
                             var remainingAfterName = string.Join(" ", wordsForCheck.Skip(3));
-                            var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                            var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province, forceAsBusiness || isLikelyBusiness);
                             result.Address = addressParse.Address;
                             result.Confidence.AddressConfidence = addressParse.AddressConfidence;
                         }
@@ -732,7 +732,7 @@ public class DatabaseDrivenParserService : IStringParserService
                             if (wordsForCheck.Length > nameEndIndex + 1)
                             {
                                 var remainingAfterName = string.Join(" ", wordsForCheck.Skip(nameEndIndex + 1));
-                                var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                                var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province, forceAsBusiness || isLikelyBusiness);
                                 result.Address = addressParse.Address;
                                 result.Confidence.AddressConfidence = addressParse.AddressConfidence;
                             }
@@ -756,7 +756,7 @@ public class DatabaseDrivenParserService : IStringParserService
                             if (wordsForCheck.Length > 2)
                             {
                                 var remainingAfterName = string.Join(" ", wordsForCheck.Skip(2));
-                                var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                                var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province, forceAsBusiness || isLikelyBusiness);
                                 result.Address = addressParse.Address;
                                 result.Confidence.AddressConfidence = addressParse.AddressConfidence > 0 ? addressParse.AddressConfidence : 50;
                                 
@@ -844,7 +844,7 @@ public class DatabaseDrivenParserService : IStringParserService
                     }
                     else
                     {
-                        var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province);
+                        var addressParse = await ParsePhonebookFormatAsync(remainingAfterName, province, forceAsBusiness || isLikelyBusiness);
                         result.Address = addressParse.Address;
                         result.Confidence.AddressConfidence = addressParse.AddressConfidence;
                     }
@@ -935,7 +935,7 @@ public class DatabaseDrivenParserService : IStringParserService
         
         // Check if this looks like a phonebook entry (personal name format)
         // Pattern: [LastName] [FirstName/Initial] [Address]
-        var phonebookParse = await ParsePhonebookFormatAsync(remainingText, province);
+        var phonebookParse = await ParsePhonebookFormatAsync(remainingText, province, forceAsBusiness || isLikelyBusiness);
         if (phonebookParse.IsPhonebook)
         {
             result.Name = phonebookParse.Name;
@@ -1263,7 +1263,7 @@ public class DatabaseDrivenParserService : IStringParserService
         return bestMatch;
     }
     
-    private async Task<PhonebookParseResult> ParsePhonebookFormatAsync(string text, string? province = null)
+    private async Task<PhonebookParseResult> ParsePhonebookFormatAsync(string text, string? province = null, bool isBusinessContext = false)
     {
         var result = new PhonebookParseResult { IsPhonebook = false };
         var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -1363,45 +1363,72 @@ public class DatabaseDrivenParserService : IStringParserService
             
             // Special handling for cardinal directions
             // Cardinal direction marks address start if:
-            // - It appears before the first number in the phrase
-            // - AND there are 2+ name parts before it (for residential: first + last name or name + initial)
-            // - OR only 1 name part before it and we should continue looking
+            // - For BUSINESS records: Cardinal followed by numbers/hyphens (like "SW 4-11-17W") ALWAYS marks address
+            // - For RESIDENTIAL records: Need 2+ name parts before cardinal (first + last name)
             if (isCardinalDirection)
             {
-                // Count how many potential name parts we have before this cardinal direction
-                int namePartsBeforeCardinal = 0;
-                for (int j = 0; j < i; j++)
+                // Check if the next word contains numbers or looks like a coordinate (e.g., "4-11-17W")
+                bool nextIsNumeric = false;
+                if (i + 1 < words.Length)
                 {
-                    var wordBeforeCardinal = words[j];
-                    // Skip connectors and non-name parts
-                    if (wordBeforeCardinal != "&" && !wordBeforeCardinal.Equals("et", StringComparison.OrdinalIgnoreCase) &&
-                        !wordBeforeCardinal.StartsWith("(") && !wordBeforeCardinal.EndsWith(")"))
-                    {
-                        namePartsBeforeCardinal++;
-                    }
+                    var nextWord = words[i + 1];
+                    // Match pure numbers or coordinate patterns like "4-11-17W" or "14-52-19-W4"
+                    nextIsNumeric = Regex.IsMatch(nextWord, @"^\d+$") || 
+                                   Regex.IsMatch(nextWord, @"^\d+[-/]\d+") ||
+                                   Regex.IsMatch(nextWord, @"^\d+[-/]\d+[-/]\d+");
                 }
                 
-                _logger.LogDebug($"Found cardinal direction '{word}' at position {i}, {namePartsBeforeCardinal} name parts before it");
-                
-                // If we have 2+ name parts before the cardinal, it marks the address start
-                if (namePartsBeforeCardinal >= 2)
+                // For business records (detected earlier), cardinal + numbers ALWAYS marks address
+                if (isBusinessContext)
                 {
-                    addressStartIndex = i;
-                    _logger.LogDebug($"Cardinal direction '{word}' marks address start (sufficient name parts: {namePartsBeforeCardinal})");
-                    break;
-                }
-                else if (namePartsBeforeCardinal == 1)
-                {
-                    // Only 1 name part - continue looking but remember this could be address start
-                    // Check if the next word is a number (strong indicator this cardinal starts the address)
-                    if (i + 1 < words.Length && Regex.IsMatch(words[i + 1], @"^\d+$"))
+                    if (nextIsNumeric)
                     {
                         addressStartIndex = i;
-                        _logger.LogDebug($"Cardinal direction '{word}' followed by number, marking as address start despite only 1 name part");
+                        _logger.LogDebug($"BUSINESS: Cardinal direction '{word}' followed by numbers, marking as address start");
                         break;
                     }
-                    // Otherwise continue looking for more definitive address markers
-                    _logger.LogDebug($"Cardinal direction '{word}' with only 1 name part, continuing to look for address");
+                    // For business without numbers after cardinal, be more aggressive about treating it as address
+                    // if we already have substantial text before it
+                    else if (i >= 4)  // At least 4 words before cardinal suggests business name is complete
+                    {
+                        addressStartIndex = i;
+                        _logger.LogDebug($"BUSINESS: Cardinal direction '{word}' after {i} words, marking as address start");
+                        break;
+                    }
+                }
+                else
+                {
+                    // Residential logic: need 2+ name parts before cardinal
+                    int namePartsBeforeCardinal = 0;
+                    for (int j = 0; j < i; j++)
+                    {
+                        var wordBeforeCardinal = words[j];
+                        // Skip connectors and non-name parts
+                        if (wordBeforeCardinal != "&" && !wordBeforeCardinal.Equals("et", StringComparison.OrdinalIgnoreCase) &&
+                            !wordBeforeCardinal.StartsWith("(") && !wordBeforeCardinal.EndsWith(")"))
+                        {
+                            namePartsBeforeCardinal++;
+                        }
+                    }
+                    
+                    _logger.LogDebug($"RESIDENTIAL: Found cardinal '{word}' at position {i}, {namePartsBeforeCardinal} name parts before it");
+                    
+                    if (namePartsBeforeCardinal >= 2)
+                    {
+                        addressStartIndex = i;
+                        _logger.LogDebug($"RESIDENTIAL: Cardinal '{word}' marks address start (sufficient name parts: {namePartsBeforeCardinal})");
+                        break;
+                    }
+                    else if (namePartsBeforeCardinal == 1 && nextIsNumeric)
+                    {
+                        addressStartIndex = i;
+                        _logger.LogDebug($"RESIDENTIAL: Cardinal '{word}' followed by number, marking as address start");
+                        break;
+                    }
+                    else
+                    {
+                        _logger.LogDebug($"RESIDENTIAL: Cardinal '{word}' with only {namePartsBeforeCardinal} name parts, continuing to look");
+                    }
                 }
             }
             
