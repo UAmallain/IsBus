@@ -1356,9 +1356,54 @@ public class DatabaseDrivenParserService : IStringParserService
             bool isNumber = Regex.IsMatch(word, @"^\d+$");
             bool isUnit = Regex.IsMatch(word, @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase);
             bool isStreetType = _streetTypeService.IsStreetType(word);
+            bool isCardinalDirection = Regex.IsMatch(word, @"^(N|S|E|W|NE|NW|SE|SW|North|South|East|West|Northeast|Northwest|Southeast|Southwest)$", RegexOptions.IgnoreCase);
             
             // Check if previous word was a connector (& or "et" for names like "M & L" or "Louis et Marie")
             bool prevWasConnector = prevWord == "&" || prevWord.Equals("et", StringComparison.OrdinalIgnoreCase);
+            
+            // Special handling for cardinal directions
+            // Cardinal direction marks address start if:
+            // - It appears before the first number in the phrase
+            // - AND there are 2+ name parts before it (for residential: first + last name or name + initial)
+            // - OR only 1 name part before it and we should continue looking
+            if (isCardinalDirection)
+            {
+                // Count how many potential name parts we have before this cardinal direction
+                int namePartsBeforeCardinal = 0;
+                for (int j = 0; j < i; j++)
+                {
+                    var wordBeforeCardinal = words[j];
+                    // Skip connectors and non-name parts
+                    if (wordBeforeCardinal != "&" && !wordBeforeCardinal.Equals("et", StringComparison.OrdinalIgnoreCase) &&
+                        !wordBeforeCardinal.StartsWith("(") && !wordBeforeCardinal.EndsWith(")"))
+                    {
+                        namePartsBeforeCardinal++;
+                    }
+                }
+                
+                _logger.LogDebug($"Found cardinal direction '{word}' at position {i}, {namePartsBeforeCardinal} name parts before it");
+                
+                // If we have 2+ name parts before the cardinal, it marks the address start
+                if (namePartsBeforeCardinal >= 2)
+                {
+                    addressStartIndex = i;
+                    _logger.LogDebug($"Cardinal direction '{word}' marks address start (sufficient name parts: {namePartsBeforeCardinal})");
+                    break;
+                }
+                else if (namePartsBeforeCardinal == 1)
+                {
+                    // Only 1 name part - continue looking but remember this could be address start
+                    // Check if the next word is a number (strong indicator this cardinal starts the address)
+                    if (i + 1 < words.Length && Regex.IsMatch(words[i + 1], @"^\d+$"))
+                    {
+                        addressStartIndex = i;
+                        _logger.LogDebug($"Cardinal direction '{word}' followed by number, marking as address start despite only 1 name part");
+                        break;
+                    }
+                    // Otherwise continue looking for more definitive address markers
+                    _logger.LogDebug($"Cardinal direction '{word}' with only 1 name part, continuing to look for address");
+                }
+            }
             
             // Special handling for parenthetical numbers like (1987)
             if (isNumber && i > 0 && prevWord == "(")
