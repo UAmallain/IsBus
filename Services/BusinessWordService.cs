@@ -54,6 +54,31 @@ public class BusinessWordService : IBusinessWordService
             return strength;
         }
         
+        // CHECK BUSINESS_INDICATORS TABLE FIRST for specific business keywords
+        var businessIndicator = await _context.BusinessIndicators
+            .Where(b => b.IndicatorText.ToLower() == wordLower && (b.IsActive ?? true))
+            .FirstOrDefaultAsync();
+            
+        if (businessIndicator != null)
+        {
+            // Map weight to strength - these are known business terms
+            BusinessIndicatorStrength indicatorStrength = businessIndicator.Weight switch
+            {
+                >= 95 => BusinessIndicatorStrength.Absolute,
+                >= 85 => BusinessIndicatorStrength.Strong,  
+                >= 70 => BusinessIndicatorStrength.Medium,
+                >= 50 => BusinessIndicatorStrength.Weak,
+                _ => BusinessIndicatorStrength.None
+            };
+            
+            if (indicatorStrength != BusinessIndicatorStrength.None)
+            {
+                _logger.LogDebug($"Word '{wordLower}' found in business_indicators with weight {businessIndicator.Weight}, strength: {indicatorStrength}");
+                _cache.Set(cacheKey, indicatorStrength, _cacheExpiration);
+                return indicatorStrength;
+            }
+        }
+        
         // Get ALL word_data entries for this word to compare counts
         var allWordData = await _context.WordData
             .Where(w => w.WordLower == wordLower)
@@ -90,7 +115,7 @@ public class BusinessWordService : IBusinessWordService
             resultStrength = businessData.WordCount switch
             {
                 >= 5000 => BusinessIndicatorStrength.Absolute,
-                >= 1000 => BusinessIndicatorStrength.Strong,
+                >= 500 => BusinessIndicatorStrength.Strong,  // Lowered from 1000 - words like "Appraisals" with 696 count should be Strong
                 >= 100 => BusinessIndicatorStrength.Medium,
                 >= 10 => BusinessIndicatorStrength.Weak,
                 _ => BusinessIndicatorStrength.None
@@ -261,6 +286,18 @@ public class BusinessWordService : IBusinessWordService
             .Distinct()
             .ToArray();
         
+        // Batch query for business indicators FIRST
+        var businessIndicators = await _context.BusinessIndicators
+            .Where(b => cleanWords.Contains(b.IndicatorText.ToLower()) && (b.IsActive ?? true))
+            .ToListAsync();
+            
+        // Create a dictionary for quick lookup
+        var indicatorDict = businessIndicators.ToDictionary(
+            b => b.IndicatorText.ToLower(),
+            b => b.Weight,
+            StringComparer.OrdinalIgnoreCase
+        );
+        
         // Batch query for ALL word data (not just business type)
         var allWordDataList = await _context.WordData
             .Where(w => cleanWords.Contains(w.WordLower))
@@ -290,6 +327,25 @@ public class BusinessWordService : IBusinessWordService
             {
                 result[word] = BusinessIndicatorStrength.Absolute;
                 continue;
+            }
+            
+            // CHECK BUSINESS_INDICATORS TABLE for known business keywords
+            if (indicatorDict.TryGetValue(word, out var indicatorWeight))
+            {
+                BusinessIndicatorStrength indicatorStrength = indicatorWeight switch
+                {
+                    >= 95 => BusinessIndicatorStrength.Absolute,
+                    >= 85 => BusinessIndicatorStrength.Strong,
+                    >= 70 => BusinessIndicatorStrength.Medium,
+                    >= 50 => BusinessIndicatorStrength.Weak,
+                    _ => BusinessIndicatorStrength.None
+                };
+                
+                if (indicatorStrength != BusinessIndicatorStrength.None)
+                {
+                    result[word] = indicatorStrength;
+                    continue;
+                }
             }
             
             // Get all entries for this word

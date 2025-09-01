@@ -94,7 +94,8 @@ public class DatabaseDrivenParserService : IStringParserService
             "Andrade Genesis 11 Breau 576-7667",
             "Andrews Max 196 King 856-9989",
             "Arc Andre Leblanc 1132 Route 133 Beaubassin East 533-8322",
-            "Arsenault Brandon 388-7131"
+            "Arsenault Brandon 388-7131",
+            "Booth Cowie Appraisals 34 Pine Ridge Cres 717-1946"
         };
         
         bool isDebugRecord = debugRecords.Contains(originalInput);
@@ -648,7 +649,8 @@ public class DatabaseDrivenParserService : IStringParserService
                         result.Success = true;
                         
                         _logger.LogInformation($"Used word data to determine 3-word name: '{result.Name}' classified as {(result.IsBusinessName ? "BUSINESS" : "RESIDENTIAL")}");
-                        return result;
+                        // DO NOT RETURN - continue analyzing full text
+                        // return result;
                     }
                     else if (wordsForCheck[2].Length == 1 && char.IsLetter(wordsForCheck[2][0]))
                     {
@@ -686,7 +688,8 @@ public class DatabaseDrivenParserService : IStringParserService
                         result.Success = true;
                         
                         _logger.LogInformation($"Detected initial-surname-initial from initial-name pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
-                        return result;
+                        // DO NOT RETURN - continue analyzing full text
+                        // return result;
                     }
                     else
                     {
@@ -787,7 +790,8 @@ public class DatabaseDrivenParserService : IStringParserService
                             
                             _logger.LogInformation($"Parsed with initial-name pattern: '{input}' -> Name: '{result.Name}' classified as {(result.IsBusinessName ? "BUSINESS" : "RESIDENTIAL")}");
                             
-                            return result;
+                            // DO NOT RETURN - continue analyzing full text
+                            // return result;
                         }
                     }
                 }
@@ -817,7 +821,8 @@ public class DatabaseDrivenParserService : IStringParserService
                     
                     _logger.LogInformation($"Parsed with initial-name pattern (2 words): '{input}' -> Name: '{result.Name}' classified as {(result.IsBusinessName ? "BUSINESS" : "RESIDENTIAL")}");
                     
-                    return result;
+                    // DO NOT RETURN - continue analyzing full text
+                    // return result;
                 }
             }
             else if (residentialInitialPattern == "name-initial" && wordsForCheck.Length >= 2)
@@ -850,58 +855,81 @@ public class DatabaseDrivenParserService : IStringParserService
                     result.Confidence.AddressConfidence = 0;
                 }
                 
-                // Split name: LastName = first word, FirstName = second initial
-                result.LastName = nameParts[0];
-                result.FirstName = nameParts[1];
+                // ALWAYS check the ENTIRE remaining text for ALL indicators
+                var fullTextAnalysis = await _businessWordService.AnalyzePhraseAsync(remainingText);
                 
-                result.IsBusinessName = false;
-                result.IsResidentialName = true;
-                result.Confidence.NameConfidence = 85;
-                result.Confidence.PhoneConfidence = 100;
-                result.Success = true;
+                if (fullTextAnalysis.isBusiness && fullTextAnalysis.maxStrength >= BusinessIndicatorStrength.Strong)
+                {
+                    // Strong business indicators found - this IS a business despite the initial pattern
+                    // Set to business and continue to extract other details
+                    forceAsBusiness = true;
+                    _logger.LogInformation($"Initial pattern detected but strong business indicators found in '{remainingText}' - FORCING AS BUSINESS");
+                    // DO NOT RETURN - continue processing to gather all information
+                }
+                else
+                {
+                    // Initial pattern suggests residential, but we'll make final decision later
+                    // For now, just note the pattern for later use
+                    _logger.LogInformation($"Initial pattern suggests residential, but continuing to analyze full text");
+                }
                 
-                _logger.LogInformation($"Parsed as residential with name-initial pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}', Address: '{result.Address}'");
-                
-                return result;
+                // Store the name pattern information for later use
+                if (!forceAsBusiness)
+                {
+                    // Store potential residential name split for later
+                    result.LastName = nameParts[0];
+                    result.FirstName = nameParts[1];
+                }
+                // Continue processing - DO NOT RETURN HERE
             }
             else if (wordsForCheck.Length == 3)
             {
-                // Treat all 3 words as the name
-                result.Name = remainingText;
-                result.Address = "";
-                result.Confidence.AddressConfidence = 0;
+                // ALWAYS check the ENTIRE remaining text for ALL indicators
+                var fullTextAnalysis = await _businessWordService.AnalyzePhraseAsync(remainingText);
                 
-                // It's a residential name
-                result.IsBusinessName = false;
-                result.IsResidentialName = true;
-                result.Confidence.NameConfidence = 85; // High confidence for this specific pattern
-                
-                // Split the name properly based on the pattern
-                if (residentialInitialPattern == "initial-surname-initial")
+                if (fullTextAnalysis.isBusiness && fullTextAnalysis.maxStrength >= BusinessIndicatorStrength.Strong)
                 {
-                    // For "A Mwinkeu C", we want: LastName = "Mwinkeu", FirstName = "A C"
-                    result.LastName = wordsForCheck[1]; // Middle word is the surname
-                    result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[2]}"; // First and last are initials
+                    // Strong business indicators found - this IS a business despite the initial pattern
+                    // Set to business and continue to extract other details
+                    forceAsBusiness = true;
+                    _logger.LogInformation($"3-word initial pattern detected but strong business indicators found in '{remainingText}' - FORCING AS BUSINESS");
+                    // DO NOT RETURN - continue processing to gather all information
                 }
-                else if (residentialInitialPattern == "initial-initial-surname")
+                else
                 {
-                    // For "J M Smith", we want: LastName = "Smith", FirstName = "J M"
-                    result.LastName = wordsForCheck[2]; // Last word is the surname
-                    result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[1]}"; // First two are initials
-                }
-                else if (residentialInitialPattern == "name-initial-initial")
-                {
-                    // For "Smith J M", we want: LastName = "Smith", FirstName = "J M"
-                    result.LastName = wordsForCheck[0]; // First word is the surname
-                    result.FirstName = $"{wordsForCheck[1]} {wordsForCheck[2]}"; // Last two are initials
+                    // Initial pattern suggests residential, but we'll make final decision later
+                    _logger.LogInformation($"3-word pattern suggests residential, but continuing to analyze full text");
                 }
                 
-                result.Confidence.PhoneConfidence = 100;
-                result.Success = true;
-                
-                _logger.LogInformation($"Parsed as residential with {residentialInitialPattern} pattern: '{input}' -> Name: '{result.Name}', LastName: '{result.LastName}', FirstName: '{result.FirstName}'");
-                
-                return result;
+                // Store the name pattern information for later use
+                if (!forceAsBusiness)
+                {
+                    // Store all 3 words as potential name
+                    result.Name = remainingText;
+                    result.Address = "";
+                    result.Confidence.AddressConfidence = 0;
+                    
+                    // Store potential residential name split based on the pattern
+                    if (residentialInitialPattern == "initial-surname-initial")
+                    {
+                        // For "A Mwinkeu C", we want: LastName = "Mwinkeu", FirstName = "A C"
+                        result.LastName = wordsForCheck[1]; // Middle word is the surname
+                        result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[2]}"; // First and last are initials
+                    }
+                    else if (residentialInitialPattern == "initial-initial-surname")
+                    {
+                        // For "J M Smith", we want: LastName = "Smith", FirstName = "J M"
+                        result.LastName = wordsForCheck[2]; // Last word is the surname
+                        result.FirstName = $"{wordsForCheck[0]} {wordsForCheck[1]}"; // First two are initials
+                    }
+                    else if (residentialInitialPattern == "name-initial-initial")
+                    {
+                        // For "Smith J M", we want: LastName = "Smith", FirstName = "J M"
+                        result.LastName = wordsForCheck[0]; // First word is the surname
+                        result.FirstName = $"{wordsForCheck[1]} {wordsForCheck[2]}"; // Last two are initials
+                    }
+                }
+                // Continue processing - DO NOT RETURN HERE
             }
         }
         
@@ -922,16 +950,22 @@ public class DatabaseDrivenParserService : IStringParserService
                     _logger.LogWarning($"DEBUG: Classifying name from phonebook parse: '{result.Name}'");
                 }
                 
-                // Use BusinessWordService to check if the name contains strong business indicators
+                // ALWAYS analyze the ENTIRE remaining text, not just the parsed name
+                var fullTextBusinessAnalysis = await _businessWordService.AnalyzePhraseAsync(remainingText);
+                
+                // Also check just the name portion
                 var nameBusinessAnalysis = await _businessWordService.AnalyzePhraseAsync(result.Name);
                 
                 if (isDebugRecord)
                 {
+                    _logger.LogWarning($"DEBUG: Full text business analysis - isBusiness: {fullTextBusinessAnalysis.isBusiness}, maxStrength: {fullTextBusinessAnalysis.maxStrength}");
                     _logger.LogWarning($"DEBUG: Name business analysis - isBusiness: {nameBusinessAnalysis.isBusiness}, maxStrength: {nameBusinessAnalysis.maxStrength}");
                 }
                 
-                if (nameBusinessAnalysis.isBusiness && 
-                    nameBusinessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong)
+                // Check if we should force as business due to earlier analysis OR current analysis of ENTIRE text OR name
+                if (forceAsBusiness || 
+                    (fullTextBusinessAnalysis.isBusiness && fullTextBusinessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong) ||
+                    (nameBusinessAnalysis.isBusiness && nameBusinessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong))
                 {
                     // Force as business
                     result.IsBusinessName = true;
@@ -940,7 +974,7 @@ public class DatabaseDrivenParserService : IStringParserService
                     
                     if (isDebugRecord)
                     {
-                        _logger.LogWarning($"DEBUG: FORCED AS BUSINESS due to strong indicators");
+                        _logger.LogWarning($"DEBUG: FORCED AS BUSINESS due to strong indicators (forceAsBusiness={forceAsBusiness})");
                     }
                 }
                 else

@@ -100,7 +100,21 @@
       "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 46696)",
       "Bash(./TestSuiteDetection.exe)",
       "Bash(/mnt/c/Program Files/dotnet/dotnet.exe script TestSuiteDetection.cs)",
-      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 34728)"
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 34728)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 59948)",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 64888)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 67172)",
+      "Bash(/mnt/c/Program Files/MariaDB 11.7/bin/mysql.exe -h 127.0.0.1 -u root -pD0ntfw!thm01MA bor_db -e \"SELECT indicator_text, weight FROM business_indicators WHERE indicator_text IN (''willow'', ''sound'', ''lighting'', ''bath'', ''shoppers'', ''mall'', ''brstr'', ''paints'', ''benmarks'', ''ofc'', ''clinic'', ''optometrist'', ''chef'', ''appraisals'', ''crisis'', ''line'') ORDER BY indicator_text;\")",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 38364)",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 68912)",
+      "Bash(/mnt/c/Program\\ Files/MariaDB\\ 11.7/bin/mysql.exe:*)"
     ],
     "deny": [],
     "ask": []
