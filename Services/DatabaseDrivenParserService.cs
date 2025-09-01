@@ -950,6 +950,38 @@ public class DatabaseDrivenParserService : IStringParserService
                     _logger.LogWarning($"DEBUG: Classifying name from phonebook parse: '{result.Name}'");
                 }
                 
+                // NEW RULE: Single-word names without strong name evidence should be treated as business
+                bool forceSingleWordAsBusiness = false;
+                var nameWords = result.Name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                if (nameWords.Length == 1)
+                {
+                    // Check if this single word has strong evidence of being a personal name
+                    var wordLower = nameWords[0].ToLower();
+                    var wordData = await _context.WordData
+                        .Where(w => w.WordLower == wordLower && 
+                               (w.WordType == "first" || w.WordType == "last" || w.WordType == "both"))
+                        .ToListAsync();
+                    
+                    // Sum up all name-related counts for this word
+                    var totalNameCount = wordData.Sum(w => w.WordCount);
+                    
+                    if (totalNameCount < 100)
+                    {
+                        // Not enough evidence this is a personal name - treat as business
+                        forceSingleWordAsBusiness = true;
+                        _logger.LogInformation($"Single word '{result.Name}' has name count {totalNameCount} (< 100) - forcing as BUSINESS");
+                        
+                        if (isDebugRecord)
+                        {
+                            _logger.LogWarning($"DEBUG: Single word name rule triggered - '{result.Name}' has total name count {totalNameCount}");
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogDebug($"Single word '{result.Name}' has name count {totalNameCount} (>= 100) - allowing normal classification");
+                    }
+                }
+                
                 // ALWAYS analyze the ENTIRE remaining text, not just the parsed name
                 var fullTextBusinessAnalysis = await _businessWordService.AnalyzePhraseAsync(remainingText);
                 
@@ -962,8 +994,8 @@ public class DatabaseDrivenParserService : IStringParserService
                     _logger.LogWarning($"DEBUG: Name business analysis - isBusiness: {nameBusinessAnalysis.isBusiness}, maxStrength: {nameBusinessAnalysis.maxStrength}");
                 }
                 
-                // Check if we should force as business due to earlier analysis OR current analysis of ENTIRE text OR name
-                if (forceAsBusiness || 
+                // Check if we should force as business due to earlier analysis OR current analysis of ENTIRE text OR name OR single-word rule
+                if (forceAsBusiness || forceSingleWordAsBusiness || 
                     (fullTextBusinessAnalysis.isBusiness && fullTextBusinessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong) ||
                     (nameBusinessAnalysis.isBusiness && nameBusinessAnalysis.maxStrength >= BusinessIndicatorStrength.Strong))
                 {
