@@ -232,7 +232,32 @@ public class DatabaseDrivenParserService : IStringParserService
             if (i > 0 && streetTypes.Contains(wordsForAnalysis[i]))
             {
                 // Check if the previous word could be a street name
-                // (not a common first/last name indicator)
+                // Skip if previous word has possessive apostrophe (e.g., "Governor's Gate")
+                var prevWord = wordsForAnalysis[i - 1];
+                if (prevWord.Contains("'"))
+                {
+                    _logger.LogDebug($"Skipping street type '{wordsForAnalysis[i]}' - previous word '{prevWord}' has possessive apostrophe");
+                    continue;
+                }
+                
+                // Also check if this might be part of a business name pattern
+                // (e.g., "Garden Apartments" often go together)
+                if (i + 1 < wordsForAnalysis.Length)
+                {
+                    var nextWord = wordsForAnalysis[i + 1].ToLower();
+                    if (wordsForAnalysis[i].Equals("Gate", StringComparison.OrdinalIgnoreCase) ||
+                        wordsForAnalysis[i].Equals("Garden", StringComparison.OrdinalIgnoreCase) ||
+                        wordsForAnalysis[i].Equals("Gardens", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (nextWord == "apartments" || nextWord == "apartment" || 
+                            nextWord == "plaza" || nextWord == "centre" || nextWord == "center")
+                        {
+                            _logger.LogDebug($"Skipping '{wordsForAnalysis[i]}' - likely part of business name with '{nextWord}'");
+                            continue;
+                        }
+                    }
+                }
+                
                 addressStartIndex = i - 1;
                 break;
             }
@@ -515,6 +540,47 @@ public class DatabaseDrivenParserService : IStringParserService
                 {
                     businessAddressStartIndex = i;
                     break;
+                }
+                // Check for cardinal directions (NW, SE, etc.) especially with hyphenated numbers
+                else if (Regex.IsMatch(word, @"^(N|S|E|W|NE|NW|SE|SW|North|South|East|West)$", RegexOptions.IgnoreCase))
+                {
+                    // Check if next word is a hyphenated number pattern (like "16-18-3E")
+                    bool hasHyphenatedNumber = false;
+                    if (i + 1 < words.Length)
+                    {
+                        var nextWord = words[i + 1];
+                        // Pattern for rural addresses: digits-digits-digits with optional letter suffix
+                        hasHyphenatedNumber = Regex.IsMatch(nextWord, @"^\d+-\d+-\d+[A-Za-z]?$");
+                        
+                        if (hasHyphenatedNumber)
+                        {
+                            _logger.LogInformation($"Cardinal '{word}' followed by hyphenated number '{nextWord}' - definite address");
+                            businessAddressStartIndex = i;
+                            break;
+                        }
+                    }
+                    
+                    // If no hyphenated number, still check if this looks like an address start
+                    // after a reasonable business name (at least 2-3 words)
+                    if (!hasHyphenatedNumber && i >= 3)
+                    {
+                        _logger.LogInformation($"Cardinal direction '{word}' at position {i} - potential address start");
+                        businessAddressStartIndex = i;
+                        break;
+                    }
+                }
+                // Check for PTH (path) keyword - address starts at the number before PTH
+                else if (word.Equals("PTH", StringComparison.OrdinalIgnoreCase) && i > 0)
+                {
+                    // Check if previous word is a number
+                    var prevWordBeforePth = words[i - 1];
+                    if (Regex.IsMatch(prevWordBeforePth, @"^\d+$"))
+                    {
+                        // Address starts at the number before PTH
+                        businessAddressStartIndex = i - 1;
+                        _logger.LogInformation($"Found PTH keyword at position {i}, starting address at previous number position {i - 1}");
+                        break;
+                    }
                 }
             }
             
@@ -1313,7 +1379,7 @@ public class DatabaseDrivenParserService : IStringParserService
         // Only look for other indicators if we haven't found a community
         if (addressStartIndex == -1)
         {
-            for (int i = 1; i < words.Length; i++)
+            for (int i = 0; i < words.Length; i++)  // Start from 0 to catch numbers at beginning
         {
             var word = words[i];
             var prevWord = i > 0 ? words[i - 1] : "";
@@ -1322,20 +1388,69 @@ public class DatabaseDrivenParserService : IStringParserService
             bool isNumber = Regex.IsMatch(word, @"^\d+$");
             bool isUnit = Regex.IsMatch(word, @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase);
             bool isStreetType = _streetTypeService.IsStreetType(word);
+            bool isCardinalDirection = Regex.IsMatch(word, @"^(N|S|E|W|NE|NW|SE|SW|North|South|East|West)$", RegexOptions.IgnoreCase);
             
             // Check if previous word was a connector (& or "et" for names like "M & L" or "Louis et Marie")
             bool prevWasConnector = prevWord == "&" || prevWord.Equals("et", StringComparison.OrdinalIgnoreCase);
             
-            // Special handling for parenthetical numbers like (1987)
-            if (isNumber && i > 0 && prevWord == "(")
+            // Check if number is bounded by special characters
+            bool isNumberBounded = false;
+            if (isNumber)
             {
-                // This is a number in parentheses, likely part of the business name
-                _logger.LogDebug($"Number {word} in parentheses, treating as part of name");
-                continue;
+                // Check previous word for opening bounds
+                bool hasOpeningBound = i > 0 && (prevWord == "(" || prevWord == "[" || prevWord == "{" || 
+                                                 prevWord == "\"" || prevWord == "'");
+                
+                // Check next word for closing bounds
+                string nextWord = (i + 1 < words.Length) ? words[i + 1] : "";
+                bool hasClosingBound = nextWord == ")" || nextWord == "]" || nextWord == "}" || 
+                                       nextWord == "\"" || nextWord == "'";
+                
+                // Also check if the number itself contains parentheses (like "(24")
+                bool selfBounded = word.StartsWith("(") || word.EndsWith(")");
+                
+                isNumberBounded = hasOpeningBound || hasClosingBound || selfBounded;
+                
+                if (isNumberBounded)
+                {
+                    _logger.LogDebug($"Number '{word}' is bounded (prev:'{prevWord}', next:'{nextWord}'), treating as part of name");
+                    continue;
+                }
             }
             
-            if (isNumber || isUnit)
+            // Special case: if this is the first word and it's a number, it's definitely address
+            if (i == 0 && isNumber && !isNumberBounded)
             {
+                addressStartIndex = 0;
+                _logger.LogDebug($"First word is a number ({word}), starting address at position 0");
+                break;
+            }
+            
+            if ((isNumber && !isNumberBounded) || isUnit)
+            {
+                // For numbers after the first position, check if there are strong business indicators before
+                if (isNumber && i > 0)
+                {
+                    // Check if any strong business words appear before this number
+                    bool hasStrongBusinessBefore = false;
+                    for (int j = 0; j < i; j++)
+                    {
+                        var bizInfo = await _businessWordService.GetBusinessWordInfoAsync(words[j]);
+                        if (bizInfo.IsBusinessWord && (bizInfo.Strength == BusinessIndicatorStrength.Strong || 
+                                                       bizInfo.Strength == BusinessIndicatorStrength.Absolute))
+                        {
+                            hasStrongBusinessBefore = true;
+                            _logger.LogDebug($"Found strong business word '{words[j]}' before number at position {i}, continuing to look");
+                            break;
+                        }
+                    }
+                    
+                    if (hasStrongBusinessBefore)
+                    {
+                        continue; // Keep looking, the number might be part of the business name
+                    }
+                }
+                
                 // Definite address start
                 addressStartIndex = i;
                 break;
@@ -1366,6 +1481,90 @@ public class DatabaseDrivenParserService : IStringParserService
                 if (!prevWasConnector)
                 {
                     addressStartIndex = i - 1; // The word before the street type starts the address
+                    break;
+                }
+            }
+            else if (isCardinalDirection)  // Cardinal direction detection
+            {
+                // Cardinal directions like NW, SE, etc. typically start addresses
+                // Example: "Interlake Full Gospel Assembly SE 16-18-3E"
+                
+                // Special case: Check if this is actually an initial in a residential name pattern
+                // E.g., "Smith W" where W is an initial, not West
+                bool isLikelyInitial = false;
+                if (i == 1 && word.Length <= 2)  // Second position, 1-2 chars
+                {
+                    // Check if first word looks like a last name (capitalized, not a number)
+                    if (words[0].Length > 2 && char.IsLetter(words[0][0]) && !Regex.IsMatch(words[0], @"^\d"))
+                    {
+                        // Check if the next word (if exists) is NOT a hyphenated number pattern
+                        if (i + 1 >= words.Length || !Regex.IsMatch(words[i + 1], @"^\d+-\d+-\d+"))
+                        {
+                            isLikelyInitial = true;
+                            _logger.LogDebug($"Treating '{word}' as initial, not cardinal direction (residential pattern)");
+                        }
+                    }
+                }
+                
+                if (!isLikelyInitial)
+                {
+                    // Check if next word is a hyphenated number pattern (like "16-18-3E")
+                    bool hasHyphenatedNumber = false;
+                    if (i + 1 < words.Length)
+                    {
+                        var nextWord = words[i + 1];
+                        // Pattern for rural addresses: digits-digits-digits with optional letter suffix
+                        hasHyphenatedNumber = Regex.IsMatch(nextWord, @"^\d+-\d+-\d+[A-Za-z]?$");
+                        
+                        if (hasHyphenatedNumber)
+                        {
+                            _logger.LogDebug($"Cardinal '{word}' followed by hyphenated number '{nextWord}' - definite address");
+                        }
+                    }
+                    
+                    // If followed by hyphenated number, this is definitely an address
+                    if (hasHyphenatedNumber)
+                    {
+                        addressStartIndex = i;
+                        _logger.LogDebug($"Starting address at cardinal direction '{word}' with hyphenated number");
+                        break;
+                    }
+                    // Otherwise, need at least 2 name parts before cardinal
+                    else if (i >= 2)
+                    {
+                        // Count how many name parts (non-business keywords) come before this
+                        int namePartsBefore = 0;
+                        for (int j = 0; j < i; j++)
+                        {
+                            // Skip business keywords and possessives
+                            if (!Regex.IsMatch(words[j], @"^\d+$") && !words[j].Contains("'s"))
+                            {
+                                namePartsBefore++;
+                            }
+                        }
+                        
+                        _logger.LogDebug($"Cardinal direction '{word}' found at position {i} with {namePartsBefore} name parts before");
+                        
+                        // If we have at least 2 name parts, consider this the start of the address
+                        if (namePartsBefore >= 2)
+                        {
+                            addressStartIndex = i;
+                            _logger.LogDebug($"Starting address at cardinal direction '{word}' position {i}");
+                            break;
+                        }
+                    }
+                }
+            }
+            // Check for PTH (path) keyword - address starts at the number before PTH
+            else if (word.Equals("PTH", StringComparison.OrdinalIgnoreCase) && i > 0)
+            {
+                // Check if previous word is a number
+                var prevWordBeforePth = words[i - 1];
+                if (Regex.IsMatch(prevWordBeforePth, @"^\d+$"))
+                {
+                    // Address starts at the number before PTH
+                    addressStartIndex = i - 1;
+                    _logger.LogDebug($"Found PTH keyword at position {i}, starting address at previous number position {i - 1}");
                     break;
                 }
             }

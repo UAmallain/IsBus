@@ -12,6 +12,14 @@ public enum BusinessIndicatorStrength
     Absolute = 4   // word_count >= 5000, no name entry OR corporate suffix
 }
 
+public class BusinessWordInfo
+{
+    public bool IsBusinessWord { get; set; }
+    public BusinessIndicatorStrength Strength { get; set; }
+    public string Source { get; set; } = "";
+    public int Count { get; set; }
+}
+
 public interface IBusinessWordService
 {
     /// <summary>
@@ -38,4 +46,9 @@ public interface IBusinessWordService
     /// Determines if a phrase contains enough business indicators to classify as business
     /// </summary>
     Task<(bool isBusiness, BusinessIndicatorStrength maxStrength, string reason)> AnalyzePhraseAsync(string phrase);
+    
+    /// <summary>
+    /// Gets detailed business word information including source and count
+    /// </summary>
+    Task<BusinessWordInfo> GetBusinessWordInfoAsync(string word);
 }

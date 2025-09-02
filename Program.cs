@@ -82,6 +82,7 @@ builder.Services.AddScoped<IStreetNameService, EnhancedStreetNameService>(); // 
 builder.Services.AddScoped<IRoadNetworkStreetService, RoadNetworkStreetService>();
 builder.Services.AddScoped<IReferenceDataService, ReferenceDataService>(); // Reference data from database tables
 builder.Services.AddScoped<IStringParserService, DatabaseDrivenParserService>(); // Database-driven parser that finds longest matching street
+builder.Services.AddScoped<IAddressVerificationService, AddressVerificationService>(); // Address verification using road_network table
 
 builder.Services.AddHealthChecks();
     // Temporarily disabled to avoid startup issues

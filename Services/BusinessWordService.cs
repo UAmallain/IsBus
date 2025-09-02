@@ -31,6 +31,58 @@ public class BusinessWordService : IBusinessWordService
         _cache = cache;
     }
     
+    public async Task<BusinessWordInfo> GetBusinessWordInfoAsync(string word)
+    {
+        var info = new BusinessWordInfo { IsBusinessWord = false, Strength = BusinessIndicatorStrength.None };
+        
+        if (string.IsNullOrWhiteSpace(word))
+            return info;
+        
+        var wordLower = word.ToLower().Trim('.', ',', '\'', '"');
+        
+        // Check business_indicators table first
+        var indicator = await _context.BusinessIndicators
+            .FirstOrDefaultAsync(b => b.IndicatorText == wordLower);
+            
+        if (indicator != null && indicator.Weight > 0)
+        {
+            info.IsBusinessWord = true;
+            info.Source = "business_indicators";
+            info.Count = indicator.Weight ?? 0;
+            // Map weight to strength
+            info.Strength = indicator.Weight switch
+            {
+                >= 1000 => BusinessIndicatorStrength.Absolute,
+                >= 500 => BusinessIndicatorStrength.Strong,
+                >= 100 => BusinessIndicatorStrength.Medium,
+                >= 10 => BusinessIndicatorStrength.Weak,
+                _ => BusinessIndicatorStrength.Weak
+            };
+            return info;
+        }
+        
+        // Check word_data table
+        var businessData = await _context.WordData
+            .FirstOrDefaultAsync(w => w.WordLower == wordLower && w.WordType == "business");
+            
+        if (businessData != null && businessData.WordCount >= 10)
+        {
+            info.IsBusinessWord = true;
+            info.Source = "word_data";
+            info.Count = businessData.WordCount;
+            info.Strength = businessData.WordCount switch
+            {
+                >= 5000 => BusinessIndicatorStrength.Absolute,
+                >= 1000 => BusinessIndicatorStrength.Strong,
+                >= 100 => BusinessIndicatorStrength.Medium,
+                >= 10 => BusinessIndicatorStrength.Weak,
+                _ => BusinessIndicatorStrength.None
+            };
+        }
+        
+        return info;
+    }
+    
     public async Task<BusinessIndicatorStrength> GetWordStrengthAsync(string word)
     {
         if (string.IsNullOrWhiteSpace(word))
