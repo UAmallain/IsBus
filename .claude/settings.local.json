@@ -107,7 +107,9 @@
       "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 14856)",
       "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 70508)",
       "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 26752)",
-      "Bash(ASPNETCORE_URLS=\"http://0.0.0.0:5086\" /mnt/c/Program Files/dotnet/dotnet.exe run --no-launch-profile)"
+      "Bash(ASPNETCORE_URLS=\"http://0.0.0.0:5086\" /mnt/c/Program Files/dotnet/dotnet.exe run --no-launch-profile)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 58024)",
+      "Bash(/mnt/c/Windows/System32/taskkill.exe /f /pid 63328)"
     ],
     "deny": [],
     "ask": []

@@ -535,14 +535,25 @@ public class DatabaseDrivenParserService : IStringParserService
                         _logger.LogInformation($"Number at position {i} doesn't look like address");
                     }
                 }
-                // Check for unit indicators
-                else if (Regex.IsMatch(word, @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase))
+                // Check for unit indicators from database
+                var suiteIndicators = await _referenceDataService.GetSuiteIndicatorsAsync();
+                if (suiteIndicators.Contains(word.ToLower()))
                 {
-                    businessAddressStartIndex = i;
-                    break;
+                    // Check if followed by a number
+                    bool followedByNumber = false;
+                    if (i + 1 < words.Length)
+                    {
+                        followedByNumber = Regex.IsMatch(words[i + 1], @"\d");
+                    }
+                    
+                    if (followedByNumber)
+                    {
+                        businessAddressStartIndex = i;
+                        break;
+                    }
                 }
                 // Check for cardinal directions (NW, SE, etc.) especially with hyphenated numbers
-                else if (Regex.IsMatch(word, @"^(N|S|E|W|NE|NW|SE|SW|North|South|East|West)$", RegexOptions.IgnoreCase))
+                if (Regex.IsMatch(word, @"^(N|S|E|W|NE|NW|SE|SW|North|South|East|West)$", RegexOptions.IgnoreCase))
                 {
                     // Check if next word is a hyphenated number pattern (like "16-18-3E")
                     bool hasHyphenatedNumber = false;
@@ -897,8 +908,23 @@ public class DatabaseDrivenParserService : IStringParserService
                 {
                     var remainingAfterName = string.Join(" ", wordsForCheck.Skip(2));
                     
-                    // If the remaining text starts with a number, it's clearly an address
-                    if (Regex.IsMatch(wordsForCheck[2], @"^\d+"))
+                    // Check if it starts with a number
+                    bool startsWithNumber = Regex.IsMatch(wordsForCheck[2], @"^\d+");
+                    
+                    // Check if it starts with a unit indicator followed by a number
+                    bool startsWithUnitIndicator = false;
+                    var suiteIndicators = await _referenceDataService.GetSuiteIndicatorsAsync();
+                    if (suiteIndicators.Contains(wordsForCheck[2].ToLower()))
+                    {
+                        // Check if followed by a number
+                        if (wordsForCheck.Length > 3 && Regex.IsMatch(wordsForCheck[3], @"\d"))
+                        {
+                            startsWithUnitIndicator = true;
+                        }
+                    }
+                    
+                    // If the remaining text starts with a number or valid unit indicator, it's clearly an address
+                    if (startsWithNumber || startsWithUnitIndicator)
                     {
                         result.Address = remainingAfterName;
                         result.Confidence.AddressConfidence = 90;
@@ -1386,7 +1412,19 @@ public class DatabaseDrivenParserService : IStringParserService
             
             // Check if this word indicates the start of an address
             bool isNumber = Regex.IsMatch(word, @"^\d+$");
-            bool isUnit = Regex.IsMatch(word, @"^(Unit|Apt|Suite|Room|Rm)$", RegexOptions.IgnoreCase);
+            
+            // Check unit indicators from database
+            var suiteIndicators = await _referenceDataService.GetSuiteIndicatorsAsync();
+            bool isUnit = false;
+            if (suiteIndicators.Contains(word.ToLower()))
+            {
+                // Only treat as unit indicator if followed by a number
+                if (i + 1 < words.Length && Regex.IsMatch(words[i + 1], @"\d"))
+                {
+                    isUnit = true;
+                }
+            }
+            
             bool isStreetType = _streetTypeService.IsStreetType(word);
             bool isCardinalDirection = Regex.IsMatch(word, @"^(N|S|E|W|NE|NW|SE|SW|North|South|East|West)$", RegexOptions.IgnoreCase);
             
@@ -1639,6 +1677,8 @@ public class DatabaseDrivenParserService : IStringParserService
                 var word = words[i];
                 var wordLower = word.ToLower().Trim('.', ',');
                 
+                _logger.LogInformation($"ParsePhonebookFormatAsync: Checking word at position {i}: '{word}'");
+                
                 // Is this an initial?
                 if (word.Length == 1 && char.IsLetter(word[0]))
                 {
@@ -1677,6 +1717,35 @@ public class DatabaseDrivenParserService : IStringParserService
                 // Check if this word is in our name database
                 else if (!Regex.IsMatch(word, @"^\d+$"))
                 {
+                    // IMPORTANT: Check if this is a unit indicator FIRST
+                    // Get suite indicators from database (includes Apt, Unit, Suite, etc.)
+                    var suiteIndicators = await _referenceDataService.GetSuiteIndicatorsAsync();
+                    
+                    // Check if this word is a suite indicator
+                    if (suiteIndicators.Contains(wordLower))
+                    {
+                        // Check if the next word contains numbers (e.g., "Apt 319" or "Suite 2B")
+                        bool followedByNumber = false;
+                        if (i + 1 < words.Length)
+                        {
+                            var nextWord = words[i + 1];
+                            // Check if next word is a number or contains numbers
+                            followedByNumber = Regex.IsMatch(nextWord, @"\d");
+                        }
+                        
+                        if (followedByNumber)
+                        {
+                            _logger.LogInformation($"UNIT INDICATOR FOUND: '{word}' at position {i} followed by number - address starts here");
+                            // Set addressStartIndex to current position and exit the loop
+                            addressStartIndex = i;
+                            break; // Stop including words in the name, address starts here
+                        }
+                        else
+                        {
+                            _logger.LogInformation($"Word '{word}' matches suite indicator but not followed by number - treating as name");
+                        }
+                    }
+                    
                     // Special handling for corporate suffixes
                     if (await _businessWordService.IsCorporateSuffixAsync(wordLower))
                     {
@@ -1755,31 +1824,35 @@ public class DatabaseDrivenParserService : IStringParserService
                 }
             }
             
-                // If we found name patterns, set the address start after them
-                if (firstWordIsLastName)
+                // Only set addressStartIndex if it wasn't already set (e.g., by finding a unit indicator)
+                if (addressStartIndex == -1)
                 {
-                    // If first word is a known last name, include all following name-like words
-                    // (initials, names, ampersands) until we hit an address indicator
-                    addressStartIndex = lastNamePartIndex + 1;
-                    if (addressStartIndex < 2 && words.Length >= 2)
+                    // If we found name patterns, set the address start after them
+                    if (firstWordIsLastName)
                     {
-                        // At minimum, include first + second word when first is a last name
+                        // If first word is a known last name, include all following name-like words
+                        // (initials, names, ampersands) until we hit an address indicator
+                        addressStartIndex = lastNamePartIndex + 1;
+                        if (addressStartIndex < 2 && words.Length >= 2)
+                        {
+                            // At minimum, include first + second word when first is a last name
+                            addressStartIndex = 2;
+                        }
+                    }
+                    else if (hasInitial || consecutiveNameWords > 0)
+                    {
+                        addressStartIndex = lastNamePartIndex + 1;
+                    }
+                    else if (words.Length >= 2)
+                    {
+                        // Default: assume first two words are the name
                         addressStartIndex = 2;
                     }
-                }
-                else if (hasInitial || consecutiveNameWords > 0)
-                {
-                    addressStartIndex = lastNamePartIndex + 1;
-                }
-                else if (words.Length >= 2)
-                {
-                    // Default: assume first two words are the name
-                    addressStartIndex = 2;
-                }
-                else
-                {
-                    // Only one word - it's the name
-                    addressStartIndex = 1;
+                    else
+                    {
+                        // Only one word - it's the name
+                        addressStartIndex = 1;
+                    }
                 }
             }
         }
